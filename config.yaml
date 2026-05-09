@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: salesguard
+  labels:
+    app: salesguard
+spec:
+  initContainers:
+    - name: wait-for-db
+      image: busybox
+      command: ['sh', '-c',
+        'until nc -z localhost 5432; do echo waiting for db; sleep 2; done']
+
+  containers:
+
+    - name: db
+      image: postgres:15-alpine
+      env:
+        - name: POSTGRES_DB
+          value: salesguard
+        - name: POSTGRES_USER
+          value: sguser
+        - name: POSTGRES_PASSWORD
+          value: sgpass
+      ports:
+        - containerPort: 5432
+      readinessProbe:
+        exec:
+          command: ['pg_isready', '-U', 'sguser', '-d', 'salesguard']
+        initialDelaySeconds: 5
+        periodSeconds: 5
+
+    - name: app
+      image: salesguard-app:latest
+      imagePullPolicy: Never
+      env:
+        - name: DB_HOST
+          value: localhost
+        - name: DB_PORT
+          value: '5432'
+        - name: DB_NAME
+          value: salesguard
+        - name: DB_USER
+          value: sguser
+        - name: DB_PASSWORD
+          value: sgpass
+      ports:
+        - containerPort: 5000
+
+    - name: nginx
+      image: nginx:1.25-alpine
+      ports:
+        - containerPort: 80
+      volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+
+    - name: pgadmin
+      image: dpage/pgadmin4:8
+      env:
+        - name: PGADMIN_DEFAULT_EMAIL
+          value: admin@salesguard.local
+        - name: PGADMIN_DEFAULT_PASSWORD
+          value: admin
+      ports:
+        - containerPort: 80
+
+  volumes:
+    - name: nginx-conf
+      configMap:
+        name: nginx-config

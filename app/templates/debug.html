@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Debug — {{ filename }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1200px; margin: 30px auto; padding: 0 20px; font-size: 13px; }
+    h1 { color: #2E75B6; }
+    h2 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 4px; margin-top: 30px; }
+    .col-block { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; }
+    .col-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .col-name { font-size: 15px; font-weight: bold; color: #222; }
+    .role-badge { padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .role-ok { background: #d4edda; color: #155724; }
+    .role-none { background: #f8d7da; color: #721c24; }
+    .conf { color: #555; font-size: 12px; }
+    .dtype { background: #e2f0ff; color: #1a5fa8; padding: 2px 8px; border-radius: 3px; font-size: 11px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 4px 8px; border: 1px solid #ddd; text-align: left; }
+    th { background: #eee; font-weight: 500; }
+    .bar-wrap { display: flex; align-items: center; gap: 6px; }
+    .bar { height: 10px; background: #2E75B6; border-radius: 2px; min-width: 2px; }
+    .bar-val { font-size: 11px; color: #555; min-width: 35px; }
+    .winner { background: #d4edda; font-weight: bold; }
+    a { color: #2E75B6; }
+    .upload-box { border: 2px dashed #ccc; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 20px; }
+    button { background: #2E75B6; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Debug: {{ filename }}</h1>
+  <p><a href="/">← Главная</a></p>
+
+  <div class="upload-box">
+    <form action="/debug" method="post" enctype="multipart/form-data">
+      <input type="file" name="file" accept=".csv,.xlsx,.xls,.json,.txt">
+      <button type="submit">Загрузить для debug</button>
+    </form>
+  </div>
+
+  {% for r in report %}
+  <div class="col-block">
+    <div class="col-header">
+      <span class="col-name">{{ r.column }}</span>
+      <span class="role-badge {{ 'role-ok' if r.role else 'role-none' }}">
+        {{ r.role or 'UNKNOWN' }}
+      </span>
+      <span class="conf">conf: {{ "%.0f"|format(r.conf * 100) }}%</span>
+      <span class="dtype">{{ r.dtype }}</span>
+    </div>
+    <div class="grid">
+      <div>
+        <b>Profile</b>
+        <table>
+          {% for k, v in r.profile.items() %}
+          <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+          {% endfor %}
+        </table>
+      </div>
+      <div>
+        <b>Raw scores</b>
+        <table>
+          {% for role, score in r.raw_scores.items() | sort(attribute='1', reverse=True) %}
+          <tr class="{{ 'winner' if role == r.role else '' }}">
+            <td>{{ role }}</td>
+            <td>
+              <div class="bar-wrap">
+                <div class="bar" style="width: {{ (score * 200)|int }}px"></div>
+                <span class="bar-val">{{ "%.3f"|format(score) }}</span>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</body>
+</html>
