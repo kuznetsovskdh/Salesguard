@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Отчёт #{{ upload.id }} — {{ upload.filename }}</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;max-width:1300px;margin:30px auto;padding:0 20px;font-size:13px}
+    h1{color:#2E75B6;margin-bottom:4px}
+    h2{color:#444;border-bottom:1px solid #eee;padding-bottom:5px;margin-top:28px}
+    .nav{display:flex;gap:10px;margin-bottom:20px;font-size:12px}
+    .nav a{color:#2E75B6;text-decoration:none;padding:3px 10px;border:1px solid #2E75B6;border-radius:4px}
+    .nav a:hover{background:#2E75B6;color:#fff}
+    /* meta */
+    .meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+    .meta-card{background:#f0f6ff;border-radius:8px;padding:12px;text-align:center}
+    .meta-card .val{font-size:22px;font-weight:bold;color:#2E75B6}
+    .meta-card .lbl{font-size:11px;color:#888;margin-top:3px}
+    .badge{display:inline-block;font-size:11px;font-weight:500;padding:2px 8px;border-radius:3px}
+    .badge-ok{background:#d4edda;color:#155724}
+    .badge-err{background:#f8d7da;color:#721c24}
+    .badge-warn{background:#fff3cd;color:#856404}
+    .badge-info{background:#d1ecf1;color:#0c5460}
+    /* tables */
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+    th,td{padding:5px 8px;border:1px solid #ddd;text-align:left;vertical-align:middle}
+    th{background:#2E75B6;color:#fff;font-weight:500}
+    tr:nth-child(even){background:#f9f9f9}
+    /* column blocks */
+    .col-block{background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:8px}
+    .col-header{display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer}
+    .col-name{font-size:14px;font-weight:bold;color:#222}
+    .col-inner{display:none}
+    .col-inner.open{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .bar-wrap{display:flex;align-items:center;gap:6px}
+    .bar{height:9px;background:#2E75B6;border-radius:2px;min-width:2px}
+    .bar-val{font-size:11px;color:#555;min-width:38px}
+    .winner td{background:#d4edda!important;font-weight:bold}
+    .role-ok{color:#155724}
+    .role-none{color:#721c24}
+    /* text log */
+    .textlog{background:#1e1e1e;color:#d4d4d4;font-family:'Courier New',monospace;font-size:11px;
+             padding:14px;border-radius:6px;overflow-x:auto;white-space:pre;margin-top:8px;max-height:500px;overflow-y:auto}
+    .copy-btn{background:#555;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11px;margin-bottom:6px}
+    .copy-btn:hover{background:#333}
+    details summary{cursor:pointer;color:#2E75B6;font-size:12px;padding:3px 0}
+  </style>
+</head>
+<body>
+
+<div class="nav">
+  <a href="/">← Главная</a>
+  <a href="/debug-history">История debug</a>
+  <a href="/debug-page">Debug файла</a>
+</div>
+
+<h1>Отчёт #{{ upload.id }} — {{ upload.filename }}</h1>
+
+<!-- Метаданные -->
+<div class="meta-grid">
+  <div class="meta-card">
+    <div class="val">
+      <span class="badge {{ 'badge-ok' if upload.status=='success' else ('badge-warn' if upload.status=='no_revenue' else 'badge-err') }}">
+        {{ upload.status }}
+      </span>
+    </div>
+    <div class="lbl">Статус</div>
+  </div>
+  <div class="meta-card"><div class="val">{{ upload.rows_total or 0 }}</div><div class="lbl">Строк сырых</div></div>
+  <div class="meta-card"><div class="val">{{ upload.rows_clean or 0 }}</div><div class="lbl">Строк чистых</div></div>
+  <div class="meta-card"><div class="val">{{ upload.format or '?' }}</div><div class="lbl">Формат</div></div>
+</div>
+
+{% if upload.error_msg %}
+<div style="background:#fff5f5;border-left:4px solid #dc3545;padding:8px 14px;border-radius:4px;margin-bottom:14px;font-size:12px;color:#dc3545">
+  ⚠ {{ upload.error_msg }}
+</div>
+{% endif %}
+
+<!-- Аналитика -->
+{% if stats %}
+<h2>Результат анализа</h2>
+<div class="meta-grid">
+  <div class="meta-card"><div class="val">{{ stats.rows }}</div><div class="lbl">Строк</div></div>
+  <div class="meta-card"><div class="val">{{ "%.0f"|format(stats.revenue_total) }}</div><div class="lbl">Выручка</div></div>
+  <div class="meta-card"><div class="val">{{ "%.0f"|format(stats.avg_check) }}</div><div class="lbl">Средний чек</div></div>
+  <div class="meta-card"><div class="val">{{ stats.products }}</div><div class="lbl">Товаров</div></div>
+</div>
+{% endif %}
+
+<!-- Маппинг колонок -->
+<h2>Маппинг колонок ({{ mapping|length }})</h2>
+<table>
+  <tr><th>Колонка</th><th>Роль</th><th>Уверенность</th><th>Dtype</th></tr>
+  {% for m in mapping %}
+  <tr>
+    <td><b>{{ m.col }}</b></td>
+    <td class="{{ 'role-ok' if m.role else 'role-none' }}">{{ m.role or 'UNKNOWN' }}</td>
+    <td class="{{ 'role-none' if m.conf < 50 else ('' if m.conf < 75 else 'role-ok') }}">{{ m.conf }}%</td>
+    <td><span class="badge badge-info">{{ m.dtype or '?' }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+
+<!-- Debug per column -->
+<h2>Debug по колонкам</h2>
+{% for col in debug_cols %}
+<div class="col-block">
+  <div class="col-header" onclick="toggle('col_{{ loop.index }}')">
+    <span class="col-name">{{ col.column }}</span>
+    <span class="badge {{ 'badge-ok' if col.role else 'badge-err' }}">{{ col.role or 'UNKNOWN' }}</span>
+    <span style="color:#888;font-size:11px">conf: {{ "%.0f"|format(col.confidence*100) }}%</span>
+    <span class="badge badge-info">{{ col.dtype }}</span>
+    <span style="color:#aaa;font-size:11px;margin-left:auto">▼ развернуть</span>
+  </div>
+  <div class="col-inner" id="col_{{ loop.index }}">
+    <div>
+      <b>Profile</b>
+      <table>
+        {% for k,v in col.profile.items() %}
+        <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <b>Raw scores</b>
+      <table>
+        {% for role, score in col.scores.items()|sort(attribute='1', reverse=True) %}
+        <tr class="{{ 'winner' if role == col.role else '' }}">
+          <td>{{ role }}</td>
+          <td>
+            <div class="bar-wrap">
+              <div class="bar" style="width:{{ (score*200)|int }}px"></div>
+              <span class="bar-val">{{ "%.3f"|format(score) }}</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+<!-- Мусорные значения -->
+{% if verdicts %}
+<h2>Мусорные значения ({{ verdicts|length }})</h2>
+<table>
+  <tr><th>Колонка</th><th>Строка</th><th>Причина</th></tr>
+  {% for v in verdicts %}
+  <tr>
+    <td>{{ v.col }}</td>
+    <td>{{ v.row }}</td>
+    <td style="color:#dc3545">{{ v.reason }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<!-- Текстовый лог для копирования -->
+<h2>Текстовый лог (для отправки)</h2>
+<button class="copy-btn" onclick="copyLog()">📋 Копировать</button>
+<div class="textlog" id="textlog">{{ text_log }}</div>
+
+<script>
+function toggle(id){
+  var el=document.getElementById(id);
+  el.classList.toggle('open');
+}
+function copyLog(){
+  var text=document.getElementById('textlog').innerText;
+  navigator.clipboard.writeText(text).then(()=>{
+    var btn=document.querySelector('.copy-btn');
+    btn.textContent='✓ Скопировано!';
+    setTimeout(()=>btn.textContent='📋 Копировать',2000);
+  });
+}
+</script>
+</body>
+</html>

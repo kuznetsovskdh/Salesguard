@@ -12,7 +12,9 @@ ALIASES = {
     "REVENUE":     ["revenue","выруч","выручка","выручка_тыс","валовая","прибыль",
                     "amount","total charges","totalcharges","monthly charges",
                     "monthlycharges","charges","cltv","retail_amount","ppvz_for_pay",
-                    "итого","оборот","total_charges","monthly_charges","total_amount"],
+                    "итого","оборот","total_charges","monthly_charges","total_amount",
+                    "profit","total_revenue","total_sales","total_sale","gross",
+                    "net_sales","net_revenue","sales","turnover","proceeds"],
     "PRICE":       ["price","цена","стоим","cost","unit_price","unitprice","цена_руб",
                     "retail_price","price_per_unit","retail_price_withdisc"],
     "QUANTITY":    ["qty","quantity","объем","объём","объем_кг","кол","units_sold",
@@ -38,7 +40,9 @@ FORBIDDEN = {
                  "protection","support","multiple","paperless","payment","gender",
                  "barcode","nm_id","chrt","rrd","rid","realizationreport",
                  "order_id","penalty","commission","spp","vw","reward","acquiring",
-                 "rebill","logistic","return_amount","delivery_amount","additional"],
+                 "rebill","logistic","return_amount","delivery_amount","additional",
+                 "transaction_id","transactionid","invoice_no","invoiceno",
+                 "invoice_id","order_no","order_number","seq","index","row_id"],
     "QUANTITY": ["flag","флаг","промо","promo","churn","score","label","zip",
                  "year","год","month","месяц","charges","total","revenue",
                  "price","cost","cltv","senior","citizen","tenure","latitude",
@@ -56,8 +60,10 @@ FORBIDDEN = {
 }
 
 DATE_FORMATS = [
-    "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y",
+    "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y", "%m/%d/%Y",
     "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M", "%d-%m-%Y", "%Y-%m",
+    "%m/%d/%y", "%d-%b-%Y", "%Y/%m/%d", "%d/%m/%y",
+    "%B %d, %Y", "%b %d, %Y", "%d %B %Y",
 ]
 VALID_YEAR_MIN = 2000
 VALID_YEAR_MAX = 2035
@@ -123,7 +129,7 @@ def detect_type(f: dict) -> str:
     if f["datetime_ratio"] > 0.7 and f["numeric_ratio"] < 0.5:
         return "datetime"
 
-    if f["numeric_ratio"] > 0.9:
+    if f["numeric_ratio"] > 0.8:
         mn = f.get("min_val", 0) or 0
         mx = f.get("max_val", 0) or 0
         mean = f.get("mean", 0) or 0
@@ -132,12 +138,10 @@ def detect_type(f: dict) -> str:
         if mean > 1e12:
             return "unix_timestamp"
 
-        # Географические координаты: ОБА значения в [-180, 180]
-        if -180 <= mn <= 180 and -180 <= mx <= 180:
-            if -90 <= mn <= 90 and -90 <= mx <= 90:
-                return "geo"
-            if abs(mean) <= 180:
-                return "geo"
+        # Географические координаты: требуем ОТРИЦАТЕЛЬНЫЕ значения
+        # (исключает Monthly Charges, Churn Score и т.п.)
+        if mn < 0 and -180 <= mn and mx <= 180:
+            return "geo"
 
         # Бинарный флаг
         if mx <= 1 and mn >= 0 and f["n_unique"] <= 2:
@@ -221,7 +225,8 @@ def distribution_score(f: dict, role: str) -> float:
 def apply_constraints(name: str, role: str, f: dict, dtype: str) -> float:
     n = name.lower()
     for k in FORBIDDEN.get(role, []):
-        if k in n:
+        # word-boundary: 'month' не должен блокировать 'monthly charges'
+        if re.search(r'(?<![a-z])' + re.escape(k) + r'(?![a-z])', n):
             return 0.0
     # Структурные блоки
     if role == "DATE" and dtype != "datetime":
@@ -289,6 +294,18 @@ def score_dimension(f, name):
 def classify_column(s: pd.Series, name: str):
     f = profile(s)
     dtype = detect_type(f)
+
+    # id_or_key override: если имя явно указывает на финансовую роль — это не ID
+    if dtype == "id_or_key":
+        for fin_role in ("REVENUE", "PRICE", "QUANTITY"):
+            if name_score(name, fin_role) >= 0.75:
+                dtype = "numeric"
+                break
+
+    # Адаптивный порог для DATE: малые датасеты + говорящее имя
+    if dtype != "datetime" and f["datetime_ratio"] > 0.4 and f["numeric_ratio"] < 0.5:
+        if name_score(name, "DATE") >= 0.75:
+            dtype = "datetime"
 
     raw = {
         "DATE":        score_date(f, name),
@@ -434,19 +451,31 @@ class Normalizer:
 
     def _fix_single_column_header(self, df: pd.DataFrame,
                                    filepath: str, fmt: str, enc: str) -> pd.DataFrame:
-        """Если прочитан 1 столбец с запятыми в имени — это CSV внутри Excel."""
+        """Если прочитан 1 столбец с запятыми — данные в CSV-формате внутри ячеек."""
         if len(df.columns) != 1:
             return df
         col_name = str(df.columns[0])
         if "," not in col_name:
             return df
-        # Заголовок — это первая строка, пробуем перечитать без header
+        # Вариант 1: каждая ячейка — comma-separated строка
+        try:
+            col_names = [c.strip() for c in col_name.split(",")]
+            if len(col_names) > 1:
+                rows = []
+                for val in df.iloc[:, 0]:
+                    parts = [p.strip() for p in str(val).split(",")]
+                    if len(parts) == len(col_names):
+                        rows.append(parts)
+                if rows:
+                    return pd.DataFrame(rows, columns=col_names)
+        except Exception:
+            pass
+        # Вариант 2: перечитать файл без header
         try:
             if fmt == "xlsx":
                 df2 = pd.read_excel(filepath, header=None)
             else:
                 df2 = pd.read_csv(filepath, header=None, encoding=enc)
-            # Первая строка — имена колонок
             df2.columns = df2.iloc[0].astype(str).str.strip()
             df2 = df2[1:].reset_index(drop=True)
             if len(df2.columns) > 1:
