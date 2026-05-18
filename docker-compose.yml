@@ -14,6 +14,7 @@ services:
 
   app:
     build: ./app
+    mem_limit: 1g
     environment:
       - DB_HOST=db
       - DB_PORT=5432

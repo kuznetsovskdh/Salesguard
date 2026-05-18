@@ -47,11 +47,37 @@
   </style>
 </head>
 <body>
-  <h1>SalesGuard Analytics</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <h1 style="margin:0;color:#2E75B6">SalesGuard Analytics</h1>
+    <div style="font-size:12px;color:#666;display:flex;gap:10px;align-items:center">
+      {% if session.username %}
+        👤 {{ session.username }}
+        {% if session.is_admin %}<span style="background:#d4edda;color:#155724;padding:1px 7px;border-radius:3px;font-size:11px">admin</span>
+        <a href="/admin" style="color:#2E75B6;text-decoration:none;border:1px solid #2E75B6;padding:3px 10px;border-radius:4px">⚙️ Admin</a>{% endif %}
+        <a href="/logout" style="color:#dc3545;text-decoration:none;border:1px solid #dc3545;padding:3px 10px;border-radius:4px">Выйти</a>
+      {% else %}
+        <a href="/login" style="color:#2E75B6;text-decoration:none;border:1px solid #2E75B6;padding:3px 10px;border-radius:4px">Войти</a>
+        <a href="/register" style="color:#28a745;text-decoration:none;border:1px solid #28a745;padding:3px 10px;border-radius:4px">Регистрация</a>
+      {% endif %}
+    </div>
+  </div>
 
-  <div class="nav">
-    <a href="/">🏠 Главная</a>
-    <a href="/debug-page">🔍 Debug-режим</a>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div class="nav">
+      <a href="/">🏠 Главная</a>
+      {% if session.is_admin %}
+      <a href="/debug-page">🔍 Debug-режим</a>
+      <a href="/admin" style="background:#28a745;color:#fff;border-color:#28a745">⚙️ Панель admin</a>
+      {% endif %}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+      {% if session.username %}
+        <span style="color:#555">👤 <b>{{ session.username }}</b>
+          {% if session.is_admin %}<span style="background:#d4edda;color:#155724;padding:1px 7px;border-radius:3px;font-size:11px;margin-left:4px">admin</span>{% endif %}
+        </span>
+        <a href="/logout" style="color:#dc3545;text-decoration:none;border:1px solid #dc3545;padding:4px 12px;border-radius:4px;font-size:12px">Выйти</a>
+      {% endif %}
+    </div>
   </div>
 
   <div class="upload-box">

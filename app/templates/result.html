@@ -21,7 +21,16 @@
 </head>
 <body>
   <h1>Результат анализа</h1>
-  <p><a href="/">← Загрузить новый файл</a></p>
+  <p>
+    <a href="/">← Загрузить новый файл</a>
+    &nbsp;|&nbsp;
+    {% if upload_id %}
+    <a href="/download/{{ upload_id }}" style="background:#28a745;color:#fff;padding:5px 14px;border-radius:4px;text-decoration:none;font-size:13px">⬇ Скачать очищенные данные (XLSX)</a>
+    {% endif %}
+    {% if session.is_admin %}
+    &nbsp;|&nbsp; <a href="/admin" style="color:#2E75B6">⚙️ Панель admin</a>
+    {% endif %}
+  </p>
 
   <h2>Сводная статистика</h2>
   <div class="stats">

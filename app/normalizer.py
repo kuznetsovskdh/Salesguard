@@ -80,6 +80,9 @@ class ValueVerdict:
 
 # ── Profiling ──────────────────────────────────────────────────────────────────
 def profile(s: pd.Series) -> dict:
+    # Для производительности сэмплируем большие колонки
+    if len(s) > 10000:
+        s = s.sample(n=10000, random_state=42)
     s_str = s.astype(str).str.strip()
     numeric = pd.to_numeric(s, errors="coerce")
     f = {}
@@ -385,11 +388,11 @@ def check_value(val, role: str) -> ValueVerdict:
 def iqr_pass(verdicts: list) -> list:
     nums = [float(v.raw) for v in verdicts
             if v.is_valid and v.detected_type == "FLOAT"]
-    if len(nums) < 4:
+    if len(nums) < 30:
         return verdicts
     q1, q3 = np.percentile(nums, [25, 75])
     iqr = q3 - q1
-    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    lo, hi = q1 - 3.0 * iqr, q3 + 3.0 * iqr
     result = []
     for v in verdicts:
         if v.is_valid and v.detected_type == "FLOAT":
@@ -415,6 +418,7 @@ class Normalizer:
         enc = self._detect_encoding(filepath)
         df = self._read(filepath, fmt, enc)
         df = self._fix_single_column_header(df, filepath, fmt, enc)
+        df = self._clean_currency(df)
         return df
 
     def _check_size(self, path):
@@ -422,12 +426,21 @@ class Normalizer:
             raise ValueError("Файл превышает 50 МБ")
 
     def _detect_format(self, path: str) -> str:
-        mime = magic.from_file(path, mime=True)
         ext = path.rsplit(".", 1)[-1].lower()
-        if ext in ("xlsx", "xls") or "spreadsheet" in mime:
+        if ext in ("xlsx", "xls"):
             return "xlsx"
-        if ext == "json" or "json" in mime:
+        if ext == "json":
             return "json"
+        if ext in ("csv", "txt"):
+            return "csv"
+        try:
+            mime = magic.from_file(path, mime=True)
+            if "spreadsheet" in mime or "excel" in mime:
+                return "xlsx"
+            if "json" in mime:
+                return "json"
+        except Exception:
+            pass
         return "csv"
 
     def _detect_encoding(self, path: str) -> str:
@@ -440,14 +453,49 @@ class Normalizer:
             return pd.read_excel(path)
         if fmt == "json":
             return pd.read_json(path)
+        # Список кодировок для попыток — всегда включаем надёжные fallback
+        encodings = list(dict.fromkeys([enc, "utf-8", "latin-1", "cp1251", "utf-8-sig"]))
         for sep in [",", ";", "\t", "|"]:
-            try:
-                df = pd.read_csv(path, sep=sep, encoding=enc, nrows=5)
-                if len(df.columns) > 1:
-                    return pd.read_csv(path, sep=sep, encoding=enc)
-            except Exception:
-                continue
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(path, sep=sep, encoding=encoding,
+                                     nrows=5, on_bad_lines="skip")
+                    if len(df.columns) > 1:
+                        return pd.read_csv(path, sep=sep, encoding=encoding,
+                                           on_bad_lines="skip", low_memory=False)
+                except UnicodeDecodeError:
+                    continue
+                except Exception:
+                    break
+        # Финальный fallback: latin-1 читает любой байт
+        try:
+            df = pd.read_csv(path, sep=None, engine="python",
+                             encoding="latin-1", on_bad_lines="skip",
+                             low_memory=False)
+            if len(df.columns) > 1:
+                return df
+        except Exception:
+            pass
         raise ValueError("Не удалось определить разделитель CSV")
+
+    def _clean_currency(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Убирает символы валют из числовых колонок. Пропускает большие df."""
+        if len(df) > 10000:
+            return df  # Пропускаем для производительности
+        currency_re = r"[₹$€£¥₩₽]"
+        sample_size = min(100, len(df))
+        for col in df.columns:
+            if df[col].dtype != object:
+                continue
+            # Быстрая проверка на образце
+            sample = df[col].dropna().head(sample_size).astype(str)
+            if not sample.str.contains(r"[₹$€£¥₩₽]", regex=True).any():
+                continue
+            cleaned = df[col].astype(str).str.replace(currency_re, "", regex=True)
+            numeric = pd.to_numeric(cleaned, errors="coerce")
+            if numeric.notna().mean() > 0.5:
+                df[col] = cleaned
+        return df
 
     def _fix_single_column_header(self, df: pd.DataFrame,
                                    filepath: str, fmt: str, enc: str) -> pd.DataFrame:
@@ -520,8 +568,12 @@ class Normalizer:
 
     def to_standard(self, df, role_map) -> pd.DataFrame:
         def get(role):
-            cols = [c for c, (r, _) in role_map.items() if r == role]
-            return df[cols[0]] if cols else None
+            cols = [(c, conf) for c, (r, conf) in role_map.items() if r == role]
+            if not cols:
+                return None
+            # Выбираем колонку с наивысшим confidence
+            best_col = max(cols, key=lambda x: x[1])[0]
+            return df[best_col]
 
         std = pd.DataFrame()
         std["sale_date"] = pd.to_datetime(get("DATE"), errors="coerce")
