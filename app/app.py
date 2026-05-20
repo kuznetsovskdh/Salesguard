@@ -276,7 +276,7 @@ def admin_delete_user():
 @login_required
 def download_xlsx(upload_id):
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT filename FROM uploads WHERE id=%s', (upload_id,))
+    cur.execute('SELECT filename FROM uploads WHERE id=%s AND (user_id=%s OR %s)', (upload_id, session['user_id'], session.get('is_admin', False)))
     urow = cur.fetchone(); conn.close()
     fname = urow[0].rsplit('.',1)[0] if urow else f'upload_{upload_id}'
     # Сначала ищем сохранённый оригинальный очищенный файл
@@ -310,7 +310,9 @@ def download_xlsx(upload_id):
 @login_required
 def index():
     conn = get_db(); cur = conn.cursor()
-    cur.execute('SELECT * FROM uploads ORDER BY created_at DESC LIMIT 20')
+    cur.execute(
+        'SELECT * FROM uploads WHERE user_id=%s ORDER BY created_at DESC LIMIT 20',
+        (session['user_id'],))
     uploads = cur.fetchall()
     logs = build_logs(cur, limit=10)
     conn.close()
@@ -335,9 +337,9 @@ def upload():
         df_std = norm.to_standard(df_clean_raw, role_map)
         debug_cols = get_col_debug(df_raw)
         if 'revenue' not in df_std.columns or df_std['revenue'].isna().all():
-            cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,error_msg)
-                VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
-                (file.filename,ext,len(df_raw),0,'no_revenue','Колонка revenue не найдена'))
+            cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,error_msg,user_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
+                (file.filename,ext,len(df_raw),0,'no_revenue','Колонка revenue не найдена',session['user_id']))
             upload_id = cur.fetchone()[0]
             for col,(role,conf) in role_map.items():
                 cur.execute('INSERT INTO column_mapping (upload_id,source_col,mapped_role,confidence) VALUES (%s,%s,%s,%s)',
@@ -349,9 +351,9 @@ def upload():
                 role_map=role_map, upload_id=upload_id,
                 warning='Revenue не найден. Проверьте маппинг колонок ниже.')
         df = clean_data(df_std); df = add_features(df)
-        cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status)
-            VALUES (%s,%s,%s,%s,%s) RETURNING id''',
-            (file.filename,ext,len(df_raw),len(df),'success'))
+        cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,user_id)
+            VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
+            (file.filename,ext,len(df_raw),len(df),'success',session['user_id']))
         upload_id = cur.fetchone()[0]
         # Bulk insert для производительности
         rows_to_insert = [

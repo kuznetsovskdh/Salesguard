@@ -49,15 +49,15 @@
 <body>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <div style="display:flex;gap:8px;align-items:center">
-      <a href="/" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">🏠 Главная</a>
+      <a href="/" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Главная</a>
       {% if session.is_admin %}
-      <a href="/debug-page" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">🔍 Debug-режим</a>
-      <a href="/admin" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">⚙️ Панель admin</a>
+      <a href="/debug-page" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Debug-режим</a>
+      <a href="/admin" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Панель admin</a>
       {% endif %}
     </div>
     <div style="display:flex;align-items:center;gap:10px;font-size:13px">
       {% if session.username %}
-        <span style="color:#555">👤 <b>{{ session.username }}</b>
+        <span style="color:#555">{{ session.username }}
           {% if session.is_admin %}<span style="background:#d4edda;color:#155724;padding:1px 7px;border-radius:3px;font-size:11px;margin-left:4px">admin</span>{% endif %}
         </span>
         <a href="/logout" style="color:#dc3545;text-decoration:none;border:1px solid #dc3545;padding:4px 12px;border-radius:4px;font-size:12px">Выйти</a>
@@ -65,7 +65,7 @@
     </div>
   </div>
 
-  <h1 style="color:#2E75B6;margin:0 0 16px">📊 SalesGuard Analytics</h1>
+  <h1 style="color:#2E75B6;margin:0 0 16px">SalesGuard Analytics</h1>
 
 {% if warning %}
   <div style="background:#fff5f5;border-left:5px solid #dc3545;border-radius:6px;
