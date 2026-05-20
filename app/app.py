@@ -18,6 +18,22 @@ from analytics.clustering import cluster_customers
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'salesguard-secret-2025')
+@app.errorhandler(413)
+def too_large(e):
+    return render_template('index.html', uploads=[], logs=[],
+        warning='Файл слишком большой. Максимальный размер — 50 МБ.'), 413
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template('index.html', uploads=[], logs=[],
+        warning=f'Внутренняя ошибка сервера: {str(e)}'), 500
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('index.html', uploads=[], logs=[],
+        warning='Страница не найдена.'), 404
+
+
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 UPLOAD_FOLDER = '/app/uploads'
 ALLOWED = {'.csv', '.xlsx', '.xls', '.json', '.txt'}
@@ -278,7 +294,7 @@ def download_xlsx(upload_id):
         return render_template('result.html', charts={},
             stats={'rows':0,'revenue_total':0,'avg_check':0,'products':0},
             role_map={}, upload_id=None,
-            warning='Данные для скачивания не найдены. Загрузите файл снова.'), 404
+            warning='Нет данных для скачивания. Возможно, файл не содержит колонки revenue.')
     df = pd.DataFrame(rows, columns=['sale_date','product','quantity','unit_price','revenue','customer_id'])
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -298,7 +314,8 @@ def index():
     uploads = cur.fetchall()
     logs = build_logs(cur, limit=10)
     conn.close()
-    return render_template('index.html', uploads=uploads, logs=logs)
+    warning = request.args.get('warning')
+    return render_template('index.html', uploads=uploads, logs=logs, warning=warning)
 
 @app.route('/upload', methods=['POST'])
 @login_required
