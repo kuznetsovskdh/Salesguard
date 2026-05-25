@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>История Debug</title>
+  <style>
+    body{font-family:Arial,sans-serif;max-width:1100px;margin:30px auto;padding:0 20px;font-size:13px}
+    h1{color:#2E75B6}
+    .nav{display:flex;gap:10px;margin-bottom:20px;font-size:12px}
+    .nav a{color:#2E75B6;text-decoration:none;padding:3px 10px;border:1px solid #2E75B6;border-radius:4px}
+    .nav a:hover{background:#2E75B6;color:#fff}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:8px 10px;border:1px solid #ddd;text-align:left}
+    th{background:#2E75B6;color:#fff}
+    tr:nth-child(even){background:#f8f8f8}
+    tr:hover{background:#e8f0ff}
+    .ok{color:#155724;font-weight:bold}
+    .err{color:#721c24;font-weight:bold}
+    .warn{color:#856404;font-weight:bold}
+    a.row-link{color:#2E75B6;text-decoration:none;font-weight:bold}
+    a.row-link:hover{text-decoration:underline}
+    .empty{color:#888;font-style:italic;padding:20px 0}
+  </style>
+</head>
+<body>
+<div class="nav">
+  <a href="/">← Главная</a>
+  <a href="/debug-page">Debug файла</a>
+</div>
+<h1>🔍 История Debug</h1>
+<p style="color:#666">Каждая загрузка сохраняет полный debug-отчёт. Нажмите на файл для просмотра.</p>
+
+{% if uploads %}
+<table>
+  <tr><th>ID</th><th>Файл</th><th>Формат</th><th>Строк</th><th>Чистых</th><th>Статус</th><th>Колонок</th><th>Дата</th></tr>
+  {% for u in uploads %}
+  <tr>
+    <td>{{ u.id }}</td>
+    <td><a class="row-link" href="/debug-history/{{ u.id }}">{{ u.filename }}</a></td>
+    <td>{{ u.format or '?' }}</td>
+    <td>{{ u.rows_total or 0 }}</td>
+    <td>{{ u.rows_clean or 0 }}</td>
+    <td class="{{ 'ok' if u.status=='success' else ('warn' if u.status=='no_revenue' else 'err') }}">{{ u.status }}</td>
+    <td>{{ u.col_count }}</td>
+    <td>{{ u.created_at }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="empty">Загрузок пока нет.</p>
+{% endif %}
+</body>
+</html>

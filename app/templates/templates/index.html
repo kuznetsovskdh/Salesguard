@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>SalesGuard Analytics</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; }
+    h1 { color: #2E75B6; }
+    h2 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    .upload-box { border: 2px dashed #ccc; padding: 30px; text-align: center; border-radius: 8px; margin-bottom: 20px; }
+    .upload-box:hover { border-color: #2E75B6; }
+    button { background: #2E75B6; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    button:hover { background: #1a5a9e; }
+    .nav { display: flex; gap: 12px; margin-bottom: 20px; font-size: 13px; }
+    .nav a { color: #2E75B6; text-decoration: none; padding: 4px 10px; border: 1px solid #2E75B6; border-radius: 4px; }
+    .nav a:hover { background: #2E75B6; color: white; }
+    /* История загрузок */
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+    th, td { padding: 7px 10px; border: 1px solid #ddd; text-align: left; }
+    th { background: #2E75B6; color: white; }
+    tr:nth-child(even) { background: #f8f8f8; }
+    .ok   { color: #155724; font-weight: bold; }
+    .err  { color: #721c24; font-weight: bold; }
+    .warn { color: #856404; font-weight: bold; }
+    /* Логи */
+    .log-section { margin-top: 30px; }
+    .log-entry { background: #f4f4f4; border-left: 4px solid #ccc; border-radius: 4px;
+                 padding: 10px 14px; margin-bottom: 10px; font-size: 12px; }
+    .log-entry.success { border-color: #28a745; background: #f0fff4; }
+    .log-entry.error   { border-color: #dc3545; background: #fff5f5; }
+    .log-entry.warn    { border-color: #ffc107; background: #fffdf0; }
+    .log-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .log-file { font-weight: bold; color: #333; }
+    .log-time { color: #888; }
+    .log-meta { display: flex; gap: 16px; flex-wrap: wrap; color: #555; margin-bottom: 6px; }
+    .log-meta span { background: #e9e9e9; padding: 1px 7px; border-radius: 3px; }
+    .log-mapping { margin-top: 6px; }
+    .log-mapping table { font-size: 11px; margin: 0; }
+    .log-mapping th { background: #555; font-size: 11px; }
+    .role-ok   { color: #155724; }
+    .role-none { color: #721c24; }
+    .role-warn { color: #856404; }
+    .verdict-block { margin-top: 6px; font-size: 11px; color: #555; }
+    details summary { cursor: pointer; color: #2E75B6; font-size: 12px; margin-top: 4px; }
+    .error-msg { color: #dc3545; font-style: italic; margin-top: 4px; }
+    .empty-log { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <a href="/" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Главная</a>
+      {% if session.is_admin %}
+      <a href="/debug-page" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Debug-режим</a>
+      <a href="/admin" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Панель admin</a>
+      {% endif %}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+      {% if session.username %}
+        <span style="color:#555">{{ session.username }}
+          {% if session.is_admin %}<span style="background:#d4edda;color:#155724;padding:1px 7px;border-radius:3px;font-size:11px;margin-left:4px">admin</span>{% endif %}
+        </span>
+        <a href="/logout" style="color:#dc3545;text-decoration:none;border:1px solid #dc3545;padding:4px 12px;border-radius:4px;font-size:12px">Выйти</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <h1 style="color:#2E75B6;margin:0 0 16px">SalesGuard Analytics</h1>
+
+{% if warning %}
+  <div style="background:#fff5f5;border-left:5px solid #dc3545;border-radius:6px;
+              padding:12px 16px;margin-bottom:16px;font-size:13px;color:#721c24">
+    <b>⚠ Предупреждение</b><br>{{ warning }}
+  </div>
+  {% endif %}
+
+  <div class="upload-box">
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <p>📂 Форматы: CSV, XLSX, JSON, TXT — до 50 МБ</p>
+      <input type="file" name="file" accept=".csv,.xlsx,.xls,.json,.txt">
+      <br><br>
+      <button type="submit">Загрузить и анализировать</button>
+    </form>
+  </div>
+
+  <h2>История загрузок</h2>
+  {% if uploads %}
+  <table>
+    <tr><th>ID</th><th>Файл</th><th>Формат</th><th>Строк</th><th>Чистых</th><th>Статус</th><th>Дата</th></tr>
+    {% for u in uploads %}
+    <tr>
+      <td>{{ u[0] }}</td>
+      <td>{{ u[1] }}</td>
+      <td>{{ u[2] or '—' }}</td>
+      <td>{{ u[4] or 0 }}</td>
+      <td>{{ u[5] or 0 }}</td>
+      <td class="{{ 'ok' if u[6]=='success' else ('warn' if u[6]=='no_revenue' else 'err') }}">
+        {{ u[6] }}
+      </td>
+      <td>{{ u[8].strftime('%d.%m %H:%M') if u[8] else '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="empty-log">Загрузок пока нет.</p>
+  {% endif %}
+
+  <!-- ═══════════ ЛОГИ ═══════════ -->
+  <div class="log-section">
+    <h2>📋 Логи обработки</h2>
+    {% if logs %}
+      {% for log in logs %}
+      <div class="log-entry {{ log.status_class }}">
+        <div class="log-header">
+          <span class="log-file">{{ log.filename }}</span>
+          <span class="log-time">{{ log.created_at }}</span>
+        </div>
+
+        <div class="log-meta">
+          <span>Статус: <b>{{ log.status }}</b></span>
+          <span>Формат: {{ log.format or '?' }}</span>
+          <span>Строк сырых: {{ log.rows_total or 0 }}</span>
+          <span>Строк чистых: {{ log.rows_clean or 0 }}</span>
+          {% if log.rows_total and log.rows_clean %}
+          <span>Очищено: {{ log.dropped }} строк ({{ log.drop_pct }}%)</span>
+          {% endif %}
+        </div>
+
+        {% if log.error_msg %}
+        <div class="error-msg">⚠ {{ log.error_msg }}</div>
+        {% endif %}
+
+        {% if log.mapping %}
+        <details>
+          <summary>Маппинг колонок ({{ log.mapping|length }})</summary>
+          <div class="log-mapping">
+            <table>
+              <tr><th>Колонка</th><th>Роль</th><th>Уверенность</th></tr>
+              {% for m in log.mapping %}
+              <tr>
+                <td>{{ m.col }}</td>
+                <td class="{{ 'role-ok' if m.role else 'role-none' }}">
+                  {{ m.role or 'UNKNOWN' }}
+                </td>
+                <td class="{{ 'role-warn' if m.conf < 60 else 'role-ok' }}">
+                  {{ m.conf }}%
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+          </div>
+        </details>
+        {% endif %}
+
+        {% if log.verdicts %}
+        <details>
+          <summary>Мусорные значения ({{ log.verdicts|length }})</summary>
+          <div class="verdict-block">
+            <table>
+              <tr><th>Колонка</th><th>Строка</th><th>Причина</th></tr>
+              {% for v in log.verdicts[:20] %}
+              <tr>
+                <td>{{ v.col }}</td>
+                <td>{{ v.row }}</td>
+                <td style="color:#dc3545">{{ v.reason }}</td>
+              </tr>
+              {% endfor %}
+              {% if log.verdicts|length > 20 %}
+              <tr><td colspan="3" style="color:#888">... и ещё {{ log.verdicts|length - 20 }}</td></tr>
+              {% endif %}
+            </table>
+          </div>
+        </details>
+        {% endif %}
+
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty-log">Логов пока нет — загрузите файл.</p>
+    {% endif %}
+  </div>
+
+</body>
+</html>

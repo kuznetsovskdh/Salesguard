@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><title>Панель администратора</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;max-width:1000px;margin:30px auto;padding:0 20px;font-size:13px}
+    h1{color:#2E75B6}
+    .nav{display:flex;gap:10px;margin-bottom:20px;font-size:12px;align-items:center}
+    .nav a{color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px}
+    .nav a:hover{background:#2E75B6;color:#fff}
+    .nav .user-info{margin-left:auto;color:#666;font-size:12px}
+    .search-bar{display:flex;gap:8px;margin-bottom:16px}
+    .search-bar input{flex:1;padding:7px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px}
+    .search-bar button{background:#2E75B6;color:#fff;border:none;padding:7px 18px;border-radius:6px;cursor:pointer}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:8px 12px;border:1px solid #ddd;text-align:left}
+    th{background:#2E75B6;color:#fff}
+    tr:nth-child(even){background:#f8f8f8}
+    .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+    .badge-admin{background:#d4edda;color:#155724}
+    .badge-user{background:#e2e3e5;color:#383d41}
+    .btn{padding:4px 12px;border:none;border-radius:4px;cursor:pointer;font-size:12px}
+    .btn-promote{background:#28a745;color:#fff}
+    .btn-demote{background:#ffc107;color:#333}
+    .btn-delete{background:#dc3545;color:#fff}
+    .btn:hover{opacity:0.85}
+    .msg{padding:8px 14px;border-radius:6px;margin-bottom:14px;font-size:13px}
+    .msg-ok{background:#d4edda;color:#155724;border:1px solid #c3e6cb}
+    .msg-err{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb}
+    .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+    .stat{background:#f0f6ff;border-radius:8px;padding:12px;text-align:center}
+    .stat .val{font-size:24px;font-weight:bold;color:#2E75B6}
+    .stat .lbl{font-size:11px;color:#888}
+    .me{font-weight:bold;color:#2E75B6}
+  </style>
+</head>
+<body>
+<div class="nav">
+  <a href="/">← Главная</a>
+  <a href="/debug-history">Debug история</a>
+  <span class="user-info">👤 {{ session.username }} <span class="badge badge-admin">admin</span> | <a href="/logout">Выйти</a></span>
+</div>
+
+<h1>⚙️ Панель администратора</h1>
+
+{% if msg %}<div class="msg msg-ok">{{ msg }}</div>{% endif %}
+{% if err %}<div class="msg msg-err">{{ err }}</div>{% endif %}
+
+<div class="stats-row">
+  <div class="stat"><div class="val">{{ users|length }}</div><div class="lbl">Всего пользователей</div></div>
+  <div class="stat"><div class="val">{{ users|selectattr('role','eq','admin')|list|length }}</div><div class="lbl">Администраторов</div></div>
+  <div class="stat"><div class="val">{{ total_uploads }}</div><div class="lbl">Всего загрузок</div></div>
+</div>
+
+<h2>Пользователи</h2>
+<form method="get">
+  <div class="search-bar">
+    <input type="text" name="q" value="{{ q or '' }}" placeholder="Поиск по имени...">
+    <button type="submit">Найти</button>
+    {% if q %}<a href="/admin" style="padding:7px 12px;border:1px solid #ccc;border-radius:6px;text-decoration:none;color:#333">Сбросить</a>{% endif %}
+  </div>
+</form>
+
+<table>
+  <tr><th>ID</th><th>Имя пользователя</th><th>Роль</th><th>Зарегистрирован</th><th>Загрузок</th><th>Действия</th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.id }}</td>
+    <td class="{{ 'me' if u.id == session.user_id else '' }}">
+      {{ u.username }}
+      {% if u.id == session.user_id %} (вы){% endif %}
+    </td>
+    <td><span class="badge badge-{{ u.role }}">{{ u.role }}</span></td>
+    <td>{{ u.created_at }}</td>
+    <td>{{ u.uploads }}</td>
+    <td>
+      {% if u.id != session.user_id %}
+        {% if u.role == 'user' %}
+        <form method="post" action="/admin/role" style="display:inline">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <input type="hidden" name="role" value="admin">
+          <button class="btn btn-promote" type="submit">↑ Сделать admin</button>
+        </form>
+        {% else %}
+        <form method="post" action="/admin/role" style="display:inline">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <input type="hidden" name="role" value="user">
+          <button class="btn btn-demote" type="submit">↓ Снять admin</button>
+        </form>
+        {% endif %}
+        <form method="post" action="/admin/delete" style="display:inline"
+              onsubmit="return confirm('Удалить пользователя {{ u.username }}?')">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <button class="btn btn-delete" type="submit">✕ Удалить</button>
+        </form>
+      {% else %}
+        <span style="color:#888;font-size:11px">— текущий пользователь —</span>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</body>
+</html>

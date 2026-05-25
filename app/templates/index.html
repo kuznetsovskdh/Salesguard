@@ -1,113 +1,107 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>SalesGuard Analytics</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; }
-    h1 { color: #2E75B6; }
-    h2 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 6px; }
-    .upload-box { border: 2px dashed #ccc; padding: 30px; text-align: center; border-radius: 8px; margin-bottom: 20px; }
-    .upload-box:hover { border-color: #2E75B6; }
-    button { background: #2E75B6; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; }
-    button:hover { background: #1a5a9e; }
-    .nav { display: flex; gap: 12px; margin-bottom: 20px; font-size: 13px; }
-    .nav a { color: #2E75B6; text-decoration: none; padding: 4px 10px; border: 1px solid #2E75B6; border-radius: 4px; }
-    .nav a:hover { background: #2E75B6; color: white; }
-    /* История загрузок */
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-    th, td { padding: 7px 10px; border: 1px solid #ddd; text-align: left; }
-    th { background: #2E75B6; color: white; }
-    tr:nth-child(even) { background: #f8f8f8; }
-    .ok   { color: #155724; font-weight: bold; }
-    .err  { color: #721c24; font-weight: bold; }
-    .warn { color: #856404; font-weight: bold; }
-    /* Логи */
-    .log-section { margin-top: 30px; }
-    .log-entry { background: #f4f4f4; border-left: 4px solid #ccc; border-radius: 4px;
-                 padding: 10px 14px; margin-bottom: 10px; font-size: 12px; }
-    .log-entry.success { border-color: #28a745; background: #f0fff4; }
-    .log-entry.error   { border-color: #dc3545; background: #fff5f5; }
-    .log-entry.warn    { border-color: #ffc107; background: #fffdf0; }
-    .log-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
-    .log-file { font-weight: bold; color: #333; }
-    .log-time { color: #888; }
-    .log-meta { display: flex; gap: 16px; flex-wrap: wrap; color: #555; margin-bottom: 6px; }
-    .log-meta span { background: #e9e9e9; padding: 1px 7px; border-radius: 3px; }
-    .log-mapping { margin-top: 6px; }
-    .log-mapping table { font-size: 11px; margin: 0; }
-    .log-mapping th { background: #555; font-size: 11px; }
-    .role-ok   { color: #155724; }
-    .role-none { color: #721c24; }
-    .role-warn { color: #856404; }
-    .verdict-block { margin-top: 6px; font-size: 11px; color: #555; }
-    details summary { cursor: pointer; color: #2E75B6; font-size: 12px; margin-top: 4px; }
-    .error-msg { color: #dc3545; font-style: italic; margin-top: 4px; }
-    .empty-log { color: #888; font-style: italic; }
-  </style>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <div style="display:flex;gap:8px;align-items:center">
-      <a href="/" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Главная</a>
+<canvas id="gravity-canvas"></canvas>
+
+<!-- Upload animation overlay -->
+<div id="upload-overlay">
+  <canvas id="upload-canvas"></canvas>
+  <div class="overlay-label" id="act-label">act I · data incoming</div>
+  <div class="flask-bar" id="flask-bar"></div>
+  <div class="overlay-msg" id="overlay-msg">
+    <h2>normalisation complete</h2>
+    <p>format verified · data clean</p>
+  </div>
+  <div class="floor-crack" id="floor-crack"></div>
+  <div class="submit-reveal" id="submit-reveal">
+    <div class="spinner"></div>
+    <p>uploading to server…</p>
+  </div>
+</div>
+
+<div class="page-content">
+  <nav class="navbar">
+    <a class="navbar-brand" href="/">Sales<span>Guard</span></a>
+    <div class="navbar-links">
+      <a class="nav-link" href="/">Home</a>
       {% if session.is_admin %}
-      <a href="/debug-page" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Debug-режим</a>
-      <a href="/admin" style="color:#2E75B6;text-decoration:none;padding:4px 12px;border:1px solid #2E75B6;border-radius:4px;font-size:13px">Панель admin</a>
+      <a class="nav-link" href="/debug-page">Debug</a>
+      <a class="nav-link" href="/admin">Admin</a>
       {% endif %}
     </div>
-    <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+    <div class="navbar-user">
       {% if session.username %}
-        <span style="color:#555">{{ session.username }}
-          {% if session.is_admin %}<span style="background:#d4edda;color:#155724;padding:1px 7px;border-radius:3px;font-size:11px;margin-left:4px">admin</span>{% endif %}
-        </span>
-        <a href="/logout" style="color:#dc3545;text-decoration:none;border:1px solid #dc3545;padding:4px 12px;border-radius:4px;font-size:12px">Выйти</a>
+        <span>{{ session.username }}</span>
+        {% if session.is_admin %}<span class="badge-role">ADMIN</span>{% endif %}
+        <a class="nav-link danger" href="/logout">Logout</a>
       {% endif %}
     </div>
-  </div>
+  </nav>
 
-  <h1 style="color:#2E75B6;margin:0 0 16px">SalesGuard Analytics</h1>
+  <main class="main">
+    <h1 class="page-title">Sales<span>Guard</span> Analytics</h1>
 
-{% if warning %}
-  <div style="background:#fff5f5;border-left:5px solid #dc3545;border-radius:6px;
-              padding:12px 16px;margin-bottom:16px;font-size:13px;color:#721c24">
-    <b>⚠ Предупреждение</b><br>{{ warning }}
-  </div>
-  {% endif %}
+    {% if warning %}
+    <div class="alert alert-warn">⚠ {{ warning }}</div>
+    {% endif %}
 
-  <div class="upload-box">
-    <form action="/upload" method="post" enctype="multipart/form-data">
-      <p>📂 Форматы: CSV, XLSX, JSON, TXT — до 50 МБ</p>
-      <input type="file" name="file" accept=".csv,.xlsx,.xls,.json,.txt">
-      <br><br>
-      <button type="submit">Загрузить и анализировать</button>
-    </form>
-  </div>
+    <!-- Upload -->
+    <div class="card" style="margin-bottom:28px">
+      <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+        <div class="upload-zone" id="drop-zone">
+          <span class="upload-zone-label">csv · xlsx · json · txt · max 50 mb</span>
+          <input type="file" name="file" id="file-input" accept=".csv,.xlsx,.xls,.json,.txt">
+        </div>
+        <div style="text-align:center">
+          <button class="btn btn-primary" type="button" id="launch-btn">
+            Upload &amp; Analyse
+          </button>
+        </div>
+      </form>
+    </div>
 
-  <h2>История загрузок</h2>
-  {% if uploads %}
-  <table>
-    <tr><th>ID</th><th>Файл</th><th>Формат</th><th>Строк</th><th>Чистых</th><th>Статус</th><th>Дата</th></tr>
-    {% for u in uploads %}
-    <tr>
-      <td>{{ u[0] }}</td>
-      <td>{{ u[1] }}</td>
-      <td>{{ u[2] or '—' }}</td>
-      <td>{{ u[4] or 0 }}</td>
-      <td>{{ u[5] or 0 }}</td>
-      <td class="{{ 'ok' if u[6]=='success' else ('warn' if u[6]=='no_revenue' else 'err') }}">
-        {{ u[6] }}
-      </td>
-      <td>{{ u[8].strftime('%d.%m %H:%M') if u[8] else '' }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}
-  <p class="empty-log">Загрузок пока нет.</p>
-  {% endif %}
+    <!-- History table -->
+    <div class="section-label">Upload history</div>
+    {% if uploads %}
+    <div class="card" style="padding:0;margin-bottom:28px;overflow:hidden">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th><th>File</th><th>Format</th>
+            <th>Rows</th><th>Clean</th><th>Status</th><th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in uploads %}
+          <tr>
+            <td style="color:var(--text-dim)">{{ u[0] }}</td>
+            <td>{{ u[1] }}</td>
+            <td style="color:var(--text-dim)">{{ u[2] or '—' }}</td>
+            <td>{{ u[4] or 0 }}</td>
+            <td>{{ u[5] or 0 }}</td>
+            <td>
+              <span class="status status-{{ 'success' if u[6]=='success' else ('warn' if u[6]=='no_revenue' else 'error') }}">
+                {{ u[6] }}
+              </span>
+            </td>
+            <td style="color:var(--text-dim)">{{ u[8].strftime('%d.%m %H:%M') if u[8] else '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">no uploads yet</div>
+    {% endif %}
 
-  <!-- ═══════════ ЛОГИ ═══════════ -->
-  <div class="log-section">
-    <h2>📋 Логи обработки</h2>
+    <!-- Processing logs -->
+    <div class="section-label">Processing logs</div>
     {% if logs %}
       {% for log in logs %}
       <div class="log-entry {{ log.status_class }}">
@@ -115,70 +109,270 @@
           <span class="log-file">{{ log.filename }}</span>
           <span class="log-time">{{ log.created_at }}</span>
         </div>
-
         <div class="log-meta">
-          <span>Статус: <b>{{ log.status }}</b></span>
-          <span>Формат: {{ log.format or '?' }}</span>
-          <span>Строк сырых: {{ log.rows_total or 0 }}</span>
-          <span>Строк чистых: {{ log.rows_clean or 0 }}</span>
+          <span>{{ log.status }}</span>
+          <span>{{ log.format or '?' }}</span>
+          <span>raw: {{ log.rows_total or 0 }}</span>
+          <span>clean: {{ log.rows_clean or 0 }}</span>
           {% if log.rows_total and log.rows_clean %}
-          <span>Очищено: {{ log.dropped }} строк ({{ log.drop_pct }}%)</span>
+          <span>dropped: {{ log.dropped }} ({{ log.drop_pct }}%)</span>
           {% endif %}
         </div>
-
-        {% if log.error_msg %}
-        <div class="error-msg">⚠ {{ log.error_msg }}</div>
-        {% endif %}
-
+        {% if log.error_msg %}<div class="log-error">⚠ {{ log.error_msg }}</div>{% endif %}
         {% if log.mapping %}
         <details>
-          <summary>Маппинг колонок ({{ log.mapping|length }})</summary>
-          <div class="log-mapping">
-            <table>
-              <tr><th>Колонка</th><th>Роль</th><th>Уверенность</th></tr>
-              {% for m in log.mapping %}
-              <tr>
-                <td>{{ m.col }}</td>
-                <td class="{{ 'role-ok' if m.role else 'role-none' }}">
-                  {{ m.role or 'UNKNOWN' }}
-                </td>
-                <td class="{{ 'role-warn' if m.conf < 60 else 'role-ok' }}">
-                  {{ m.conf }}%
-                </td>
-              </tr>
-              {% endfor %}
+          <summary>column mapping ({{ log.mapping|length }})</summary>
+          <div style="margin-top:8px;border-radius:6px;overflow:hidden">
+            <table class="data-table">
+              <thead><tr><th>Column</th><th>Role</th><th>Confidence</th></tr></thead>
+              <tbody>
+                {% for m in log.mapping %}
+                <tr>
+                  <td>{{ m.col }}</td>
+                  <td style="color:{{ 'var(--accent)' if m.role else 'var(--danger)' }}">{{ m.role or 'UNKNOWN' }}</td>
+                  <td style="color:{{ 'var(--warn)' if m.conf < 60 else 'var(--accent)' }}">{{ m.conf }}%</td>
+                </tr>
+                {% endfor %}
+              </tbody>
             </table>
           </div>
         </details>
         {% endif %}
-
         {% if log.verdicts %}
         <details>
-          <summary>Мусорные значения ({{ log.verdicts|length }})</summary>
-          <div class="verdict-block">
-            <table>
-              <tr><th>Колонка</th><th>Строка</th><th>Причина</th></tr>
-              {% for v in log.verdicts[:20] %}
-              <tr>
-                <td>{{ v.col }}</td>
-                <td>{{ v.row }}</td>
-                <td style="color:#dc3545">{{ v.reason }}</td>
-              </tr>
-              {% endfor %}
-              {% if log.verdicts|length > 20 %}
-              <tr><td colspan="3" style="color:#888">... и ещё {{ log.verdicts|length - 20 }}</td></tr>
-              {% endif %}
+          <summary>dirty values ({{ log.verdicts|length }})</summary>
+          <div style="margin-top:8px;border-radius:6px;overflow:hidden">
+            <table class="data-table">
+              <thead><tr><th>Column</th><th>Row</th><th>Reason</th></tr></thead>
+              <tbody>
+                {% for v in log.verdicts[:20] %}
+                <tr>
+                  <td>{{ v.col }}</td><td>{{ v.row }}</td>
+                  <td style="color:var(--danger)">{{ v.reason }}</td>
+                </tr>
+                {% endfor %}
+                {% if log.verdicts|length > 20 %}
+                <tr><td colspan="3" style="color:var(--text-dim)">… {{ log.verdicts|length - 20 }} more</td></tr>
+                {% endif %}
+              </tbody>
             </table>
           </div>
         </details>
         {% endif %}
-
       </div>
       {% endfor %}
     {% else %}
-      <p class="empty-log">Логов пока нет — загрузите файл.</p>
+    <div class="empty-state">no logs yet — upload a file</div>
     {% endif %}
-  </div>
+  </main>
+</div>
 
+<script src="/static/gravity.js"></script>
+<script>
+(function(){
+  const TOKENS=[
+    '2024-03-15','#8472','SKU-441','1 299 ₽','C-0091','TXN-4421',
+    '2023-11-02','#3301','SKU-887','549 ₽','C-4872','revenue',
+    'sale_date','product','qty: 42','customer_id','2024-01-28',
+    '12 400 ₽','#1147','region: EU','TXN-7741','SKU-220','NaN',
+    '2023-08-14','#9934','340 ₽','C-0018','SKU-115','null',
+    '4 750 ₽','2024-06-01','#4421','SKU-998','ID-8801','280 ₽',
+  ];
+  const GARBAGE=new Set(['NaN','null','???','#ERR']);
+  let pendingForm=null;
+
+  document.getElementById('launch-btn').addEventListener('click',function(){
+    const fi=document.getElementById('file-input');
+    if(!fi.files||fi.files.length===0){
+      const z=document.getElementById('drop-zone');
+      z.style.borderColor='var(--danger)';
+      z.style.animation='shake .4s ease';
+      setTimeout(()=>{z.style.borderColor='';z.style.animation='';},500);
+      return;
+    }
+    pendingForm=document.getElementById('upload-form');
+    startAnimation();
+  });
+
+  const zone=document.getElementById('drop-zone');
+  zone.addEventListener('dragover',e=>{e.preventDefault();zone.style.borderColor='var(--accent)';});
+  zone.addEventListener('dragleave',()=>{zone.style.borderColor='';});
+  zone.addEventListener('drop',e=>{
+    e.preventDefault();zone.style.borderColor='';
+    if(e.dataTransfer.files.length) document.getElementById('file-input').files=e.dataTransfer.files;
+  });
+
+  function startAnimation(){
+    const overlay=document.getElementById('upload-overlay');
+    overlay.classList.add('active');
+
+    const canvas=document.getElementById('upload-canvas');
+    const W=canvas.width=window.innerWidth;
+    const H=canvas.height=window.innerHeight;
+    const ctx=canvas.getContext('2d');
+
+    let pills=[], floor=H-60, floorGone=false;
+    const GRAV=0.22, FRICTION=0.55, RESTITUTION=0.18;
+
+    function spawnPill(){
+      const text=TOKENS[Math.floor(Math.random()*TOKENS.length)];
+      ctx.font='12px "IBM Plex Mono",monospace';
+      const tw=ctx.measureText(text).width;
+      const pw=tw+22, ph=26;
+      return {
+        text, pw, ph,
+        x: pw/2+Math.random()*(W-pw),
+        y: -ph,
+        vy: 0.5+Math.random()*1.5,
+        vx: (Math.random()-.5)*0.5,
+        angle: (Math.random()-.5)*0.1,
+        av: (Math.random()-.5)*0.005,
+        resting: false,
+        garbage: GARBAGE.has(text),
+        alpha: 0,
+      };
+    }
+
+    function stackTop(p){
+      let top=floor;
+      pills.forEach(o=>{
+        if(o===p||!o.resting) return;
+        const dx=Math.abs(o.x-p.x);
+        if(dx<o.pw*0.7) top=Math.min(top, o.y-o.ph/2-p.ph/2-1);
+      });
+      return top;
+    }
+
+    let spawnTimer=0, actTimer=0, act=1;
+    const ACT1_DUR=4000, ACT2_DUR=3000, ACT3_START=7000;
+    const t0=Date.now();
+
+    const actLabel=document.getElementById('act-label');
+    const flaskBar=document.getElementById('flask-bar');
+    const overlayMsg=document.getElementById('overlay-msg');
+    const floorCrack=document.getElementById('floor-crack');
+    const submitReveal=document.getElementById('submit-reveal');
+
+    function frame(){
+      const elapsed=Date.now()-t0;
+      ctx.clearRect(0,0,W,H);
+
+      // Spawn
+      if(act===1 && elapsed<ACT1_DUR){
+        spawnTimer++;
+        if(spawnTimer%5===0 && pills.length<60) pills.push(spawnPill());
+      }
+
+      // Act transitions
+      if(elapsed>ACT1_DUR && act===1){
+        act=2;
+        actLabel.textContent='act II · flask normalizing';
+        flaskBar.style.top=(H*0.6)+'px';
+        flaskBar.style.opacity='1';
+        setTimeout(()=>{ overlayMsg.style.opacity='1'; },1400);
+      }
+      if(elapsed>ACT3_START && act===2){
+        act=3;
+        actLabel.textContent='act III · uploading…';
+        overlayMsg.style.opacity='0';
+        flaskBar.style.opacity='0';
+        floorCrack.classList.add('show');
+
+        // Screen shake
+        let s=0;
+        const sh=setInterval(()=>{
+          overlay.style.transform=`translate(${(Math.random()-.5)*7}px,${(Math.random()-.5)*4}px)`;
+          if(++s>7){clearInterval(sh);overlay.style.transform='';}
+        },40);
+
+        setTimeout(()=>{
+          floorGone=true;
+          pills.forEach(p=>{ if(p.resting){ p.resting=false; p.vy=-0.5+Math.random()*2; } });
+        },350);
+
+        setTimeout(()=>{
+          submitReveal.classList.add('show');
+          setTimeout(()=>{ if(pendingForm) pendingForm.submit(); },900);
+        },1800);
+      }
+
+      // Physics
+      pills.forEach(p=>{
+        if(p.alpha<0.9) p.alpha=Math.min(0.9,p.alpha+0.04);
+        if(p.resting && !floorGone) return;
+        if(floorGone){
+          p.vy+=0.55; p.y+=p.vy; p.x+=p.vx; p.angle+=p.av;
+          p.alpha=Math.max(0,p.alpha-0.012);
+          return;
+        }
+        p.vy+=GRAV; p.y+=p.vy; p.x+=p.vx; p.angle+=p.av;
+        p.x=Math.max(p.pw/2, Math.min(W-p.pw/2, p.x));
+        const top=stackTop(p);
+        if(p.y+p.ph/2>=top){
+          p.y=top-p.ph/2;
+          p.vy*=-RESTITUTION;
+          p.vx*=FRICTION;
+          p.av*=0.6;
+          if(Math.abs(p.vy)<0.4){ p.vy=0; p.vx=0; p.av=0; p.resting=true; }
+        }
+      });
+
+      // Draw pills
+      pills.forEach(p=>{
+        if(p.alpha<=0) return;
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(p.angle);
+        ctx.globalAlpha=p.alpha;
+
+        // Pill background
+        ctx.beginPath();
+        const r=5, w=p.pw, h=p.ph;
+        ctx.moveTo(-w/2+r,-h/2);
+        ctx.lineTo(w/2-r,-h/2);
+        ctx.arcTo(w/2,-h/2,w/2,-h/2+r,r);
+        ctx.lineTo(w/2,h/2-r);
+        ctx.arcTo(w/2,h/2,w/2-r,h/2,r);
+        ctx.lineTo(-w/2+r,h/2);
+        ctx.arcTo(-w/2,h/2,-w/2,h/2-r,r);
+        ctx.lineTo(-w/2,-h/2+r);
+        ctx.arcTo(-w/2,-h/2,-w/2+r,-h/2,r);
+        ctx.closePath();
+
+        if(p.garbage){
+          ctx.fillStyle='rgba(255,64,96,0.15)';
+          ctx.fill();
+          ctx.strokeStyle='rgba(255,64,96,0.45)';
+          ctx.lineWidth=0.7;
+          ctx.stroke();
+          ctx.fillStyle='rgba(255,130,130,0.9)';
+        } else if(p.resting){
+          ctx.fillStyle='rgba(0,232,122,0.1)';
+          ctx.fill();
+          ctx.strokeStyle='rgba(0,232,122,0.4)';
+          ctx.lineWidth=0.7;
+          ctx.stroke();
+          ctx.fillStyle='rgba(0,232,122,0.9)';
+        } else {
+          ctx.fillStyle='rgba(107,107,138,0.12)';
+          ctx.fill();
+          ctx.strokeStyle='rgba(107,107,138,0.3)';
+          ctx.lineWidth=0.7;
+          ctx.stroke();
+          ctx.fillStyle='rgba(180,180,210,0.7)';
+        }
+        ctx.font='11px "IBM Plex Mono",monospace';
+        ctx.textAlign='center';
+        ctx.textBaseline='middle';
+        ctx.fillText(p.text,0,0);
+        ctx.restore();
+      });
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
 </body>
 </html>

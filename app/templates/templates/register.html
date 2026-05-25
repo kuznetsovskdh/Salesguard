@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"><title>Регистрация — SalesGuard</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f0f4f8;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+    .card{background:#fff;border-radius:12px;padding:36px 40px;width:360px;box-shadow:0 4px 24px rgba(0,0,0,.1)}
+    h1{color:#2E75B6;margin:0 0 24px;font-size:22px;text-align:center}
+    .logo{text-align:center;font-size:32px;margin-bottom:8px}
+    label{display:block;font-size:13px;color:#555;margin-bottom:4px;margin-top:14px}
+    input[type=text],input[type=password]{width:100%;padding:9px 12px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box}
+    input:focus{outline:none;border-color:#2E75B6}
+    button{width:100%;background:#2E75B6;color:#fff;border:none;padding:11px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:20px}
+    button:hover{background:#1a5a9e}
+    .err{background:#fff5f5;border:1px solid #f5c6cb;color:#721c24;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px}
+    .info{background:#d1ecf1;border:1px solid #bee5eb;color:#0c5460;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px}
+    .link{text-align:center;margin-top:16px;font-size:13px;color:#666}
+    .link a{color:#2E75B6;text-decoration:none}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">📊</div>
+  <h1>Регистрация</h1>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if info %}<div class="info">{{ info }}</div>{% endif %}
+  <form method="post">
+    <label>Имя пользователя</label>
+    <input type="text" name="username" required autofocus>
+    <label>Пароль</label>
+    <input type="password" name="password" required>
+    <label>Повторите пароль</label>
+    <input type="password" name="password2" required>
+    <button type="submit">Зарегистрироваться</button>
+  </form>
+  <div class="link">Уже есть аккаунт? <a href="/login">Войти</a></div>
+</div>
+</body>
+</html>
