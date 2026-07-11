@@ -135,7 +135,11 @@ def profile(s: pd.Series) -> dict:
 
     # datetime только если значения НЕ числовые
     if f["numeric_ratio"] < 0.5:
-        dt = pd.to_datetime(s, errors="coerce")
+        with pd.option_context("mode.chained_assignment", None):
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore", UserWarning)
+                dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
         dt_ratio = dt.notna().mean()
         # sanity check: год должен быть в разумном диапазоне
         if dt_ratio > 0.5:
