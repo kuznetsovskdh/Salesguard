@@ -6,3 +6,5 @@ app/uploads/
 tests/test_data.xlsx
 tests/test_semicolon.csv
 tests/test_wb_style.json
+*.bak
+venv/

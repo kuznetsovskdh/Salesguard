@@ -14,14 +14,18 @@ ALIASES = {
                     "monthlycharges","charges","cltv","retail_amount","ppvz_for_pay",
                     "итого","оборот","total_charges","monthly_charges","total_amount",
                     "profit","total_revenue","total_sales","total_sale","gross",
-                    "net_sales","net_revenue","sales","turnover","proceeds"],
+                    "net_sales","net_revenue","sales","turnover","proceeds",
+                    "вайлдберриз реализовал товар","реализовано на сумму",
+                    "к перечислению за товар","выкуплено","итого к начислению"],
     "PRICE":       ["price","цена","стоим","cost","unit_price","unitprice","цена_руб",
                     "retail_price","price_per_unit","retail_price_withdisc"],
     "QUANTITY":    ["qty","quantity","объем","объём","объем_кг","кол","units_sold",
                     "count","volume","units"],
     "CUSTOMER_ID": ["customerid","customer_id","клиент","buyer","rid"],
     "PRODUCT":     ["product","товар","артикул","item","sku","subject_name",
-                    "stockcode","description","наименован","product_name"],
+                    "stockcode","description","наименован","product_name",
+                    "артикул поставщика","артикул продавца","название товара",
+                    "предмет","код товара ozon"],
     "DIMENSION":   ["country","city","region","state","gender","category","segment",
                     "канал","категория","сегмент","регион","страна","город",
                     "service","method","contract","billing","label","reason",
@@ -67,6 +71,42 @@ DATE_FORMATS = [
 ]
 VALID_YEAR_MIN = 2000
 VALID_YEAR_MAX = 2035
+
+# ── REPORT_TYPE detection ───────────────────────────────────────────────────
+REPORT_TYPE_MARKERS = {
+    "wb_detail":       ["тип документа", "обоснование для оплаты"],
+    "wb_dynamics":      ["заказано, шт", "выкуплено"],
+    "wb_stock":         ["остаток на начало периода", "остаток на конец периода"],
+    "wb_summary":       ["№ отчета", "юридическое лицо", "тип отчета"],
+    "ozon_detail":      ["код товара ozon", "реализовано на сумму"],
+    "ozon_stock":       ["остаток доступный к продаже"],
+    "ozon_summary":     ["заказано на сумму", "к перечислению"],
+    "ozon_settlement":  ["баланс после операции"],
+    "ozon_akt_sverki":  ["дебет (начислено продавцу)", "кредит (оплачено"],
+}
+
+# Отчёты, пригодные для товарной аналитики (ABC/RFM/margin)
+PRODUCT_LEVEL_REPORTS = {"wb_detail", "wb_dynamics", "ozon_detail"}
+
+
+def detect_report_type(df: pd.DataFrame) -> str:
+    """Определяет тип отчёта по маркерным колонкам. Возвращает ключ из
+    REPORT_TYPE_MARKERS или 'unknown', если ни один маркер не совпал."""
+    cols_lower = [str(c).lower().strip() for c in df.columns]
+    cols_joined = " | ".join(cols_lower)
+
+    best_type, best_score = "unknown", 0
+    for report_type, markers in REPORT_TYPE_MARKERS.items():
+        if all(m in cols_joined for m in markers):
+            score = len(markers)
+            if score > best_score:
+                best_type, best_score = report_type, score
+
+    return best_type if best_score > 0 else "unknown"
+
+
+def is_product_level_report(report_type: str) -> bool:
+    return report_type in PRODUCT_LEVEL_REPORTS
 
 
 @dataclass
@@ -448,9 +488,28 @@ class Normalizer:
             raw = f.read(32768)
         return chardet.detect(raw).get("encoding") or "utf-8"
 
+    def _read_xlsx_smart_header(self, path: str) -> pd.DataFrame:
+        """Ozon/WB отчёты часто имеют merged-заголовок или преамбулу перед
+        реальной шапкой таблицы. Сдвигаем header построчно (до 10 строк),
+        пока доля колонок 'Unnamed:' не упадёт ниже 30%."""
+        for header_row in range(0, 10):
+            try:
+                df = pd.read_excel(path, header=header_row)
+            except Exception:
+                continue
+            if len(df.columns) == 0:
+                continue
+            unnamed_ratio = sum(
+                str(c).startswith("Unnamed:") for c in df.columns
+            ) / len(df.columns)
+            if unnamed_ratio < 0.3:
+                return df
+        # fallback: ничего не подошло — возвращаем header=0 как раньше
+        return pd.read_excel(path)
+
     def _read(self, path, fmt, enc) -> pd.DataFrame:
         if fmt == "xlsx":
-            return pd.read_excel(path)
+            return self._read_xlsx_smart_header(path)
         if fmt == "json":
             return pd.read_json(path)
         # Список кодировок для попыток — всегда включаем надёжные fallback
