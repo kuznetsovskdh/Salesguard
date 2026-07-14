@@ -113,6 +113,30 @@ def is_product_level_report(report_type: str) -> bool:
     return report_type in PRODUCT_LEVEL_REPORTS
 
 
+# ── Return detection ────────────────────────────────────────────────────────
+RETURN_MARKERS = ["возврат", "return", "возвращено"]
+
+
+def detect_return_mask(df: pd.DataFrame) -> pd.Series:
+    """Помечает строки-возвраты. Ищет маркеры в текстовых/категориальных
+    колонках (типа 'Тип документа', 'Обоснование для оплаты') и в первой
+    колонке multi-block Excel-структур Ozon (значение 'Возвращено' как
+    заголовок блока)."""
+    mask = pd.Series([False] * len(df), index=df.index)
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        col_lower = str(col).lower()
+        # Проверяем только колонки, которые похожи на статус/тип операции
+        if not any(k in col_lower for k in ["тип", "обоснование", "статус", "type", "status"]):
+            continue
+        col_mask = df[col].astype(str).str.lower().str.contains(
+            "|".join(RETURN_MARKERS), na=False, regex=True
+        )
+        mask = mask | col_mask
+    return mask
+
+
 @dataclass
 class ValueVerdict:
     raw: object
@@ -671,6 +695,8 @@ class Normalizer:
         return df_clean
 
     def to_standard(self, df, role_map) -> pd.DataFrame:
+        return_mask = detect_return_mask(df)
+
         def get(role):
             cols = [(c, conf) for c, (r, conf) in role_map.items() if r == role]
             if not cols:
@@ -710,5 +736,6 @@ class Normalizer:
         std["commission"] = pd.to_numeric(comm, errors="coerce") if comm is not None else None
         std["logistics"] = pd.to_numeric(log, errors="coerce") if log is not None else None
         std["points"] = pd.to_numeric(pts, errors="coerce") if pts is not None else None
+        std["is_return"] = return_mask.reset_index(drop=True)
 
         return std
