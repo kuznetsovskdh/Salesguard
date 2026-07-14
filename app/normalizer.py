@@ -30,6 +30,10 @@ ALIASES = {
                     "канал","категория","сегмент","регион","страна","город",
                     "service","method","contract","billing","label","reason",
                     "brand","warehouse","bonus","supplier","tech","churn_reason"],
+    "COMMISSION":  ["вознаграждение wb","сумма комиссии","комиссия",
+                    "вознаграждение ozon"],
+    "LOGISTICS":   ["стоимость логистики","логистика, руб"],
+    "POINTS":      ["баллы за скидки"],
 }
 
 FORBIDDEN = {
@@ -248,6 +252,12 @@ def type_score(dtype: str, role: str) -> float:
         "DIMENSION":   {"categorical": 1.0, "text": 0.8, "flag": 0.6,
                         "score_like": 0.6, "month_like": 0.4,
                         "geo": 0.3, "numeric": 0.3},
+        "COMMISSION":  {"numeric": 1.0, "geo": 0.0, "unix_timestamp": 0.0,
+                        "flag": 0.0, "year_like": 0.0, "month_like": 0.0},
+        "LOGISTICS":   {"numeric": 1.0, "geo": 0.0, "unix_timestamp": 0.0,
+                        "flag": 0.0, "year_like": 0.0, "month_like": 0.0},
+        "POINTS":      {"numeric": 1.0, "geo": 0.0, "unix_timestamp": 0.0,
+                        "flag": 0.0, "year_like": 0.0, "month_like": 0.0},
     }
     return matrix.get(role, {}).get(dtype, 0.5)
 
@@ -265,6 +275,8 @@ def distribution_score(f: dict, role: str) -> float:
         return 1.0 if 0 < mean < 50000 else 0.3
     if role == "CUSTOMER_ID":
         return 1.0 if f["unique_ratio"] > 0.9 else 0.2
+    if role in ("COMMISSION", "LOGISTICS", "POINTS"):
+        return 1.0 if f["unique_ratio"] < 0.99 else 0.3
     return 0.5
 
 
@@ -281,8 +293,14 @@ def apply_constraints(name: str, role: str, f: dict, dtype: str) -> float:
     if role == "REVENUE" and dtype in ("geo", "unix_timestamp", "flag",
                                         "year_like", "month_like", "id_or_key"):
         return 0.0
+    if role == "REVENUE" and name_score(name, "COMMISSION") >= 0.75:
+        return 0.0
+    if role == "QUANTITY" and name_score(name, "COMMISSION") >= 0.75:
+        return 0.0
     if role == "PRICE" and dtype in ("geo", "unix_timestamp", "flag",
                                       "year_like", "month_like"):
+        return 0.0
+    if role == "PRICE" and name_score(name, "COMMISSION") >= 0.75:
         return 0.0
     if role == "QUANTITY" and dtype in ("geo", "unix_timestamp", "flag",
                                          "year_like", "categorical", "text"):
@@ -291,6 +309,14 @@ def apply_constraints(name: str, role: str, f: dict, dtype: str) -> float:
                                         "score_like"):
         return 0.0
     if role == "CUSTOMER_ID" and f["unique_ratio"] < 0.5:
+        return 0.0
+    if role == "CUSTOMER_ID" and (f.get("neg_ratio") is not None):
+        # CUSTOMER_ID никогда не бывает денежной колонкой с дробями/отрицательными
+        if name_score(name, "COMMISSION") >= 0.75 or name_score(name, "LOGISTICS") >= 0.75:
+            return 0.0
+    if role in ("COMMISSION", "LOGISTICS", "POINTS") and name_score(name, role) < 0.5:
+        # эти роли нельзя определить только по числовому профилю, обязательно
+        # нужно совпадение имени - иначе ловим ID/номера поставок и т.п.
         return 0.0
     return 1.0
 
@@ -336,6 +362,18 @@ def score_dimension(f, name):
             0.20 * (1 if (f.get("numeric_ratio") or 1) < 0.3 else 0) +
             0.10 * (1 if f["unique_ratio"] < 0.7 else 0))
 
+def score_commission(f, name):
+    return (0.60 * name_score(name, "COMMISSION") +
+            0.40 * (1 if (f.get("numeric_ratio") or 0) > 0.9 else 0))
+
+def score_logistics(f, name):
+    return (0.60 * name_score(name, "LOGISTICS") +
+            0.40 * (1 if (f.get("numeric_ratio") or 0) > 0.9 else 0))
+
+def score_points(f, name):
+    return (0.60 * name_score(name, "POINTS") +
+            0.40 * (1 if (f.get("numeric_ratio") or 0) > 0.9 else 0))
+
 
 # ── Classify single column ─────────────────────────────────────────────────────
 def classify_column(s: pd.Series, name: str):
@@ -344,7 +382,7 @@ def classify_column(s: pd.Series, name: str):
 
     # id_or_key override: если имя явно указывает на финансовую роль — это не ID
     if dtype == "id_or_key":
-        for fin_role in ("REVENUE", "PRICE", "QUANTITY"):
+        for fin_role in ("REVENUE", "PRICE", "QUANTITY", "COMMISSION", "LOGISTICS", "POINTS"):
             if name_score(name, fin_role) >= 0.75:
                 dtype = "numeric"
                 break
@@ -362,6 +400,9 @@ def classify_column(s: pd.Series, name: str):
         "CUSTOMER_ID": score_customer(f, name),
         "PRODUCT":     score_product(f, name),
         "DIMENSION":   score_dimension(f, name),
+        "COMMISSION":  score_commission(f, name),
+        "LOGISTICS":   score_logistics(f, name),
+        "POINTS":      score_points(f, name),
     }
 
     # Взвешенное: 50% type + 30% name/stats + 20% distribution
@@ -634,8 +675,18 @@ class Normalizer:
             cols = [(c, conf) for c, (r, conf) in role_map.items() if r == role]
             if not cols:
                 return None
-            # Выбираем колонку с наивысшим confidence
-            best_col = max(cols, key=lambda x: x[1])[0]
+            if role == "PRODUCT" and len(cols) > 1:
+                # tie-break: предпочитаем колонку, чьё имя явно про артикул/SKU -
+                # это надёжный бизнес-идентификатор для группировки, в отличие
+                # от "названия товара", которое к тому же реже используется
+                # как ключ в cost_reference/справочниках себестоимости
+                article_markers = ("артикул", "sku", "код товара")
+                def article_score(col_name):
+                    n = col_name.lower()
+                    return 1 if any(m in n for m in article_markers) else 0
+                best_col = max(cols, key=lambda x: (x[1], article_score(x[0])))[0]
+            else:
+                best_col = max(cols, key=lambda x: x[1])[0]
             return df[best_col]
 
         std = pd.DataFrame()
@@ -652,4 +703,12 @@ class Normalizer:
         std["quantity"] = pd.to_numeric(q, errors="coerce") if q is not None else None
         std["unit_price"] = pd.to_numeric(pr, errors="coerce") if pr is not None else None
         std["customer_id"] = get("CUSTOMER_ID")
+
+        comm = get("COMMISSION")
+        log = get("LOGISTICS")
+        pts = get("POINTS")
+        std["commission"] = pd.to_numeric(comm, errors="coerce") if comm is not None else None
+        std["logistics"] = pd.to_numeric(log, errors="coerce") if log is not None else None
+        std["points"] = pd.to_numeric(pts, errors="coerce") if pts is not None else None
+
         return std
