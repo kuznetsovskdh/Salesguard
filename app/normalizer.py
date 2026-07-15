@@ -716,7 +716,7 @@ class Normalizer:
             return df[best_col]
 
         std = pd.DataFrame()
-        std["sale_date"] = pd.to_datetime(get("DATE"), errors="coerce")
+        std["sale_date"] = pd.to_datetime(get("DATE"), errors="coerce", dayfirst=True)
         std["product"] = get("PRODUCT")
         q = get("QUANTITY")
         pr = get("PRICE")
