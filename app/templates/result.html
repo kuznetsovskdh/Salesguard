@@ -32,6 +32,13 @@
     {% endif %}
   </p>
 
+  {% if insights %}
+  <h2>🤖 AI Insights</h2>
+  <div style="background:#f0f6ff;border-left:4px solid #2E75B6;border-radius:6px;padding:14px 18px;margin-bottom:20px;line-height:1.6;font-size:14px">
+    {{ insights }}
+  </div>
+  {% endif %}
+
   <h2>Сводная статистика</h2>
   <div class="stats">
     <div class="stat-card"><div class="val">{{ stats.rows }}</div><div class="lbl">Строк</div></div>

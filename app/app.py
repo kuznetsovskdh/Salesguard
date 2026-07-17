@@ -13,8 +13,11 @@ from normalizer import (Normalizer, profile, detect_type, classify_column,
 from analytics.cleaning import clean_data
 from analytics.features import add_features
 from analytics.abc import abc_analysis
-from analytics.seasonality import seasonality
-from analytics.clustering import cluster_customers
+from analytics.seasonality import seasonality, product_lifecycle_cohort
+from analytics.clustering import cluster_customers, rfm_sku_analysis
+from analytics.margin import margin_analysis
+from analytics.insights_context import build_metrics_context
+from analytics.insights_template import generate_template_insights
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'salesguard-secret-2025')
@@ -398,8 +401,20 @@ def upload():
         stats = {'rows':len(df),'revenue_total':float(df['revenue'].sum()),
                  'avg_check':float(df['avg_check'].mean()) if 'avg_check' in df else 0,
                  'products':int(df['product'].nunique()) if 'product' in df and df['product'].notna().any() else 0}
+
+        # AI Insights: собираем метрики RFM/margin/cohorts и генерируем текст
+        try:
+            rfm_df = rfm_sku_analysis(df)
+            margin_df = margin_analysis(df)
+            cohort_df = product_lifecycle_cohort(df)
+            insights_context = build_metrics_context(df, abc, rfm_df, margin_df, cohort_df)
+            insights_text = generate_template_insights(insights_context)
+        except Exception:
+            insights_text = None
+
         return render_template('result.html', charts=charts, stats=stats,
-                               role_map=role_map, upload_id=upload_id, warning=None)
+                               role_map=role_map, upload_id=upload_id, warning=None,
+                               insights=insights_text)
     except Exception as e:
         conn.rollback()
         try:
