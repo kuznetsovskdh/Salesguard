@@ -17,7 +17,8 @@ from analytics.seasonality import seasonality, product_lifecycle_cohort
 from analytics.clustering import cluster_customers, rfm_sku_analysis
 from analytics.margin import margin_analysis
 from analytics.insights_context import build_metrics_context
-from analytics.insights_template import generate_template_insights
+from analytics.insights_llm import generate_ai_insights
+from analytics.llm_providers.groq_provider import GroqProvider
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'salesguard-secret-2025')
@@ -402,13 +403,18 @@ def upload():
                  'avg_check':float(df['avg_check'].mean()) if 'avg_check' in df else 0,
                  'products':int(df['product'].nunique()) if 'product' in df and df['product'].notna().any() else 0}
 
-        # AI Insights: собираем метрики RFM/margin/cohorts и генерируем текст
+        # AI Insights: собираем метрики RFM/margin/cohorts, пробуем LLM,
+        # при любой ошибке тихо откатываемся на шаблонный генератор
         try:
             rfm_df = rfm_sku_analysis(df)
             margin_df = margin_analysis(df)
             cohort_df = product_lifecycle_cohort(df)
             insights_context = build_metrics_context(df, abc, rfm_df, margin_df, cohort_df)
-            insights_text = generate_template_insights(insights_context)
+            try:
+                llm_provider = GroqProvider()
+            except ValueError:
+                llm_provider = None  # GROQ_API_KEY не задан - сразу fallback
+            insights_text = generate_ai_insights(insights_context, provider=llm_provider)
         except Exception:
             insights_text = None
 
