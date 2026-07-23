@@ -20,9 +20,19 @@ def margin_analysis(df: pd.DataFrame, cost_df: pd.DataFrame = None) -> pd.DataFr
     if 'revenue' not in df.columns:
         return pd.DataFrame()
 
+    # Margin L1 требует реальных данных о комиссии - если колонка отсутствует
+    # или полностью пуста (отчёт не содержит этой информации, как в
+    # wb_dynamics), считать margin_l1=revenue было бы вводящим в заблуждение
+    # (искусственные 100%), а не честным расчётом
+    has_commission_data = (
+        'commission' in df.columns and not df['commission'].isna().all()
+    )
+    if not has_commission_data:
+        return pd.DataFrame()
+
     work = df.copy()
 
-    commission = work['commission'].fillna(0) if 'commission' in work.columns else 0
+    commission = work['commission'].fillna(0)
     logistics = work['logistics'].fillna(0) if 'logistics' in work.columns else 0
     points = work['points'].fillna(0) if 'points' in work.columns else 0
 
