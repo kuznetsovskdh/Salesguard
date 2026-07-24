@@ -9,7 +9,8 @@ from flask import (Flask, request, render_template, jsonify,
 from werkzeug.security import generate_password_hash, check_password_hash
 from normalizer import (Normalizer, profile, detect_type, classify_column,
                         score_revenue, score_price, score_quantity,
-                        score_date, score_customer, score_product, score_dimension)
+                        score_date, score_customer, score_product, score_dimension,
+                        detect_report_type, is_product_level_report)
 from analytics.cleaning import clean_data
 from analytics.features import add_features
 from analytics.abc import abc_analysis
@@ -340,10 +341,23 @@ def upload():
         df_clean_raw = norm.apply_verdicts(df_raw, matrix, role_map)
         df_std = norm.to_standard(df_clean_raw, role_map)
         debug_cols = get_col_debug(df_raw)
-        if 'revenue' not in df_std.columns or df_std['revenue'].isna().all():
+        report_type = detect_report_type(df_raw)
+        product_level = is_product_level_report(report_type)
+        no_revenue = 'revenue' not in df_std.columns or df_std['revenue'].isna().all()
+        report_type_blocks_analysis = not product_level and report_type != 'unknown'
+        if no_revenue or report_type_blocks_analysis:
+            if not product_level and report_type != 'unknown':
+                error_text = (
+                    f'Этот отчёт распознан как "{report_type}" — он не содержит '
+                    f'товарного разреза продаж (SKU + revenue), поэтому ABC/RFM/margin-'
+                    f'аналитика для него недоступна. Загрузите товарную детализацию '
+                    f'(например, отчёт о продажах/реализации) для полного анализа.'
+                )
+            else:
+                error_text = 'Колонка revenue не найдена'
             cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,error_msg,user_id)
                 VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
-                (file.filename,ext,len(df_raw),0,'no_revenue','Колонка revenue не найдена',session['user_id']))
+                (file.filename,ext,len(df_raw),0,'no_revenue',error_text,session['user_id']))
             upload_id = cur.fetchone()[0]
             for col,(role,conf) in role_map.items():
                 cur.execute('INSERT INTO column_mapping (upload_id,source_col,mapped_role,confidence) VALUES (%s,%s,%s,%s)',
@@ -353,7 +367,7 @@ def upload():
             return render_template('result.html', charts={},
                 stats={'rows':0,'revenue_total':0,'avg_check':0,'products':0},
                 role_map=role_map, upload_id=upload_id,
-                warning='Revenue не найден. Проверьте маппинг колонок ниже.')
+                warning=error_text)
         df = clean_data(df_std); df = add_features(df)
         cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,user_id)
             VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
