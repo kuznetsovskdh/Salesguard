@@ -71,6 +71,60 @@
   <script>Plotly.newPlot("ch_cl", {{ charts.clusters|safe }})</script>
   {% endif %}
 
+  {% if rfm_table %}
+  <h2>RFM-сегментация товаров</h2>
+  <table>
+    <tr><th>Товар</th><th>Recency</th><th>Frequency</th><th>Monetary</th><th>Сегмент</th></tr>
+    {% for row in rfm_table %}
+    <tr>
+      <td>{{ row.product }}</td>
+      <td>{{ row.recency }}</td>
+      <td>{{ row.frequency }}</td>
+      <td>{{ '%.0f'|format(row.monetary) }}</td>
+      <td>{{ row.segment }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if margin_table %}
+  <h2>Маржинальность по товарам</h2>
+  <table>
+    <tr><th>Товар</th><th>Выручка</th><th>Маржа L1</th><th>Маржа L1, %</th>
+        {% if margin_table[0].margin_l2 is not none %}<th>Маржа L2</th><th>Маржа L2, %</th>{% endif %}</tr>
+    {% for row in margin_table %}
+    <tr>
+      <td>{{ row.product }}</td>
+      <td>{{ '%.0f'|format(row.revenue) }}</td>
+      <td>{{ '%.0f'|format(row.margin_l1) }}</td>
+      <td>{{ '%.1f'|format(row.margin_l1_pct * 100) if row.margin_l1_pct is not none else '—' }}</td>
+      {% if row.margin_l2 is not none %}
+      <td>{{ '%.0f'|format(row.margin_l2) }}</td>
+      <td>{{ '%.1f'|format(row.margin_l2_pct * 100) if row.margin_l2_pct is not none else '—' }}</td>
+      {% elif margin_table[0].margin_l2 is not none %}
+      <td>—</td><td>—</td>
+      {% endif %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if cohort_table %}
+  <h2>Товарные когорты (retention по месяцам)</h2>
+  <table>
+    <tr>
+      {% for col in cohort_columns %}<th>{{ col }}</th>{% endfor %}
+    </tr>
+    {% for row in cohort_table %}
+    <tr>
+      {% for col in cohort_columns %}
+      <td>{{ '%.1f'|format(row[col]) + '%' if row[col] is not none and col != 'cohort' else (row[col] if row[col] is not none else '—') }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   <h2>Маппинг колонок</h2>
   <table>
     <tr><th>Исходная колонка</th><th>Роль</th><th>Уверенность</th></tr>

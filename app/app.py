@@ -417,12 +417,20 @@ def upload():
                  'avg_check':float(df['avg_check'].mean()) if 'avg_check' in df else 0,
                  'products':int(df['product'].nunique()) if 'product' in df and df['product'].notna().any() else 0}
 
-        # AI Insights: собираем метрики RFM/margin/cohorts, пробуем LLM,
-        # при любой ошибке тихо откатываемся на шаблонный генератор
+        # RFM/margin/cohorts считаются один раз, используются и для таблиц
+        # в UI, и для контекста AI Insights - не дублируем вызовы модулей
+        rfm_df = rfm_sku_analysis(df)
+        margin_df = margin_analysis(df)
+        cohort_df = product_lifecycle_cohort(df)
+
+        rfm_table = rfm_df.to_dict('records') if not rfm_df.empty else []
+        margin_table = margin_df.to_dict('records') if not margin_df.empty else []
+        cohort_table = cohort_df.to_dict('records') if not cohort_df.empty else []
+        cohort_columns = list(cohort_df.columns) if not cohort_df.empty else []
+
+        # AI Insights: пробуем LLM, при любой ошибке тихо откатываемся на
+        # шаблонный генератор
         try:
-            rfm_df = rfm_sku_analysis(df)
-            margin_df = margin_analysis(df)
-            cohort_df = product_lifecycle_cohort(df)
             insights_context = build_metrics_context(df, abc, rfm_df, margin_df, cohort_df)
             try:
                 llm_provider = GroqProvider()
@@ -434,7 +442,9 @@ def upload():
 
         return render_template('result.html', charts=charts, stats=stats,
                                role_map=role_map, upload_id=upload_id, warning=None,
-                               insights=insights_text)
+                               insights=insights_text,
+                               rfm_table=rfm_table, margin_table=margin_table,
+                               cohort_table=cohort_table, cohort_columns=cohort_columns)
     except Exception as e:
         conn.rollback()
         try:
