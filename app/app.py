@@ -15,6 +15,7 @@ from analytics.cleaning import clean_data
 from analytics.features import add_features
 from analytics.abc import abc_analysis
 from analytics.seasonality import seasonality, product_lifecycle_cohort
+from analytics.forecast import forecast_revenue, detect_anomalies
 from analytics.clustering import cluster_customers, rfm_sku_analysis
 from analytics.margin import margin_analysis
 from analytics.insights_context import build_metrics_context
@@ -428,6 +429,20 @@ def upload():
         cohort_table = cohort_df.to_dict('records') if not cohort_df.empty else []
         cohort_columns = list(cohort_df.columns) if not cohort_df.empty else []
 
+        # Forecast/Anomaly: топ-3 SKU по выручке, прогноз 30 дней + аномалии
+        forecast_charts = {}
+        anomalies_by_sku = {}
+        if not abc.empty:
+            top_skus = abc.sort_values('revenue', ascending=False)['product'].head(3).tolist()
+            for sku in top_skus:
+                fc_df = forecast_revenue(df, product=sku, horizon_days=30)
+                if not fc_df.empty:
+                    fig_fc = px.line(fc_df, x='date', y='forecast', title=f'Прогноз продаж: {sku}')
+                    forecast_charts[sku] = json.dumps(fig_fc, cls=plotly.utils.PlotlyJSONEncoder)
+                an_df = detect_anomalies(df, product=sku)
+                if not an_df.empty:
+                    anomalies_by_sku[sku] = an_df.to_dict('records')
+
         # AI Insights: пробуем LLM, при любой ошибке тихо откатываемся на
         # шаблонный генератор
         try:
@@ -444,7 +459,8 @@ def upload():
                                role_map=role_map, upload_id=upload_id, warning=None,
                                insights=insights_text,
                                rfm_table=rfm_table, margin_table=margin_table,
-                               cohort_table=cohort_table, cohort_columns=cohort_columns)
+                               cohort_table=cohort_table, cohort_columns=cohort_columns,
+                               forecast_charts=forecast_charts, anomalies_by_sku=anomalies_by_sku)
     except Exception as e:
         conn.rollback()
         try:

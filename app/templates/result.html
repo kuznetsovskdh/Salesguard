@@ -71,6 +71,32 @@
   <script>Plotly.newPlot("ch_cl", {{ charts.clusters|safe }})</script>
   {% endif %}
 
+  {% if forecast_charts %}
+  <h2>Прогноз продаж (топ-3 товара, 30 дней)</h2>
+  {% for sku, chart_json in forecast_charts.items() %}
+  <div id="ch_forecast_{{ loop.index }}"></div>
+  <script>Plotly.newPlot("ch_forecast_{{ loop.index }}", {{ chart_json|safe }})</script>
+  {% endfor %}
+  {% endif %}
+
+  {% if anomalies_by_sku %}
+  <h2>Обнаруженные аномалии продаж</h2>
+  {% for sku, anomalies in anomalies_by_sku.items() %}
+  <h3 style="font-size:15px;color:#666;margin-top:16px">{{ sku }}</h3>
+  <table>
+    <tr><th>Дата</th><th>Значение</th><th>Локальный тренд</th><th>Тип</th></tr>
+    {% for a in anomalies %}
+    <tr>
+      <td>{{ a.date.strftime('%d.%m.%Y') if a.date else '' }}</td>
+      <td>{{ '%.0f'|format(a.value) }}</td>
+      <td>{{ '%.1f'|format(a.local_trend) if a.local_trend is not none else '—' }}</td>
+      <td style="color:{{ '#dc3545' if a.type == 'spike' else '#856404' }}">{{ 'всплеск' if a.type == 'spike' else 'провал' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+  {% endif %}
+
   {% if rfm_table %}
   <h2>RFM-сегментация товаров</h2>
   <table>
