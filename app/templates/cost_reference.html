@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SalesGuard — Cost Reference</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<canvas id="gravity-canvas"></canvas>
+
+<div class="page-content">
+  <nav class="navbar">
+    <a class="navbar-brand" href="/">Sales<span>Guard</span></a>
+    <div class="navbar-links">
+      <a class="nav-link" href="/">Home</a>
+      <a class="nav-link" href="/cost-reference">Cost Reference</a>
+      {% if session.is_admin %}
+      <a class="nav-link" href="/debug-page">Debug</a>
+      <a class="nav-link" href="/admin">Admin</a>
+      {% endif %}
+    </div>
+    <div class="navbar-user">
+      {% if session.username %}
+        <span>{{ session.username }}</span>
+        {% if session.is_admin %}<span class="badge-role">ADMIN</span>{% endif %}
+        <a class="nav-link danger" href="/logout">Logout</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <main class="main">
+    <h1 class="page-title">Cost <span>Reference</span></h1>
+    <p style="color:var(--text-dim);font-family:var(--mono);font-size:12px;margin-bottom:20px">
+      Справочник себестоимости (SKU → закупочная цена) для Margin Layer 2.
+      Загрузка обновляет существующие SKU и добавляет новые — старые записи,
+      которых нет в новом файле, не удаляются.
+    </p>
+
+    {% if msg %}
+    <div class="alert alert-info">{{ msg }}</div>
+    {% endif %}
+    {% if err %}
+    <div class="alert alert-error">⚠ {{ err }}</div>
+    {% endif %}
+
+    <div class="card" style="margin-bottom:28px">
+      <form action="/cost-reference/upload" method="post" enctype="multipart/form-data">
+        <div class="upload-zone">
+          <span class="upload-zone-label">csv · xlsx · json · txt · колонки: sku_or_article + cost_price</span>
+          <input type="file" name="file" accept=".csv,.xlsx,.xls,.json,.txt">
+        </div>
+        <div style="text-align:center">
+          <button class="btn btn-primary" type="submit">Загрузить справочник</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section-label">
+      Текущий справочник
+      {% if last_updated %}<span style="color:var(--text-dim);font-weight:400">— обновлён {{ last_updated }}</span>{% endif %}
+    </div>
+
+    {% if entries %}
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table">
+        <thead>
+          <tr><th>SKU</th><th>Себестоимость</th><th>Обновлено</th></tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.sku }}</td>
+            <td>{{ "%.2f"|format(e.unit_cost) }} ₽</td>
+            <td style="color:var(--text-dim)">{{ e.updated_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">справочник пуст — загрузите файл выше</div>
+    {% endif %}
+  </main>
+</div>
+
+<script src="/static/gravity.js"></script>
+</body>
+</html>

@@ -55,7 +55,10 @@ FORBIDDEN = {
                  "year","год","month","месяц","charges","total","revenue",
                  "price","cost","cltv","senior","citizen","tenure","latitude",
                  "longitude","lat","long","service","method","contract",
-                 "commission","spp","vw","reward","rebill","penalty"],
+                 "commission","spp","vw","reward","rebill","penalty",
+                 "поставки","поставка","№","order_id","invoice",
+                 "invoice_no","invoiceno","invoice_id","order_no",
+                 "order_number","transaction_id","transactionid"],
     "PRICE":    ["zip","id","year","год","month","месяц","flag","churn",
                  "score","label","latitude","longitude","lat","long","tenure",
                  "commission","rebill","logistic","penalty","spp","vw"],
@@ -326,7 +329,9 @@ def apply_constraints(name: str, role: str, f: dict, dtype: str) -> float:
         return 0.0
     if role == "PRICE" and name_score(name, "COMMISSION") >= 0.75:
         return 0.0
-    if role == "QUANTITY" and dtype in ("geo", "unix_timestamp", "flag",
+    if role == "QUANTITY" and dtype == "flag" and name_score(name, "QUANTITY") < 0.75:
+        return 0.0
+    if role == "QUANTITY" and dtype in ("geo", "unix_timestamp",
                                          "year_like", "categorical", "text"):
         return 0.0
     if role == "PRODUCT" and dtype in ("geo", "unix_timestamp", "numeric",
@@ -410,6 +415,11 @@ def classify_column(s: pd.Series, name: str):
             if name_score(name, fin_role) >= 0.75:
                 dtype = "numeric"
                 break
+
+    # flag override: почти-всегда-1 колонка с говорящим именем QUANTITY -
+    # это реальное количество (напр. WB "Кол-во"), а не бинарный флаг
+    if dtype == "flag" and name_score(name, "QUANTITY") >= 0.75:
+        dtype = "numeric"
 
     # Адаптивный порог для DATE: малые датасеты + говорящее имя
     if dtype != "datetime" and f["datetime_ratio"] > 0.4 and f["numeric_ratio"] < 0.5:

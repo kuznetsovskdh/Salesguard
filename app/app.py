@@ -73,6 +73,81 @@ def admin_required(f):
     return decorated
 
 
+SQL_UPSERT_COSTREF = 'INSERT INTO cost_reference (user_id, sku, unit_cost, updated_at) VALUES (%s,%s,%s,NOW()) ON CONFLICT (user_id, sku) DO UPDATE SET unit_cost=EXCLUDED.unit_cost, updated_at=NOW()'
+SQL_SELECT_COSTREF = 'SELECT sku, unit_cost FROM cost_reference WHERE user_id=%s'
+SQL_SELECT_ENTRIES = 'SELECT sku, unit_cost, updated_at FROM cost_reference WHERE user_id=%s ORDER BY updated_at DESC'
+
+# ── COST REFERENCE (справочник себестоимости) ──────────────────────────────────
+def get_cost_reference_df(user_id):
+    """Текущий справочник себестоимости пользователя как DataFrame
+    (sku_or_article, cost_price) - под контракт margin_analysis(cost_df=...)."""
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(SQL_SELECT_COSTREF, (user_id,))
+    rows = cur.fetchall(); conn.close()
+    if not rows:
+        return None
+    rows = [(sku, float(cost)) for sku, cost in rows]
+    return pd.DataFrame(rows, columns=["sku_or_article", "cost_price"])
+
+def upsert_cost_reference(user_id, sku_cost_pairs):
+    """Upsert по (user_id, sku): обновляет unit_cost+updated_at для
+    существующих SKU, создаёт новые записи для новых. Ничего не удаляет."""
+    conn = get_db(); cur = conn.cursor()
+    inserted = 0
+    for sku, cost in sku_cost_pairs:
+        if sku is None or pd.isna(sku) or pd.isna(cost):
+            continue
+        cur.execute(SQL_UPSERT_COSTREF, (user_id, str(sku).strip(), float(cost)))
+        inserted += 1
+    conn.commit(); conn.close()
+    return inserted
+
+@app.route("/cost-reference")
+@login_required
+def cost_reference_page():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(SQL_SELECT_ENTRIES, (session["user_id"],))
+    rows = cur.fetchall(); conn.close()
+    entries = [{"sku": r[0], "unit_cost": float(r[1]),
+                "updated_at": r[2].strftime("%d.%m.%Y %H:%M") if r[2] else ""} for r in rows]
+    last_updated = entries[0]["updated_at"] if entries else None
+    msg = request.args.get("msg")
+    err = request.args.get("err")
+    return render_template("cost_reference.html", entries=entries,
+                           last_updated=last_updated, msg=msg, err=err)
+
+@app.route("/cost-reference/upload", methods=["POST"])
+@login_required
+def cost_reference_upload():
+    file = request.files.get("file")
+    if not file:
+        return redirect(url_for("cost_reference_page", err="Файл не выбран"))
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED:
+        return redirect(url_for("cost_reference_page", err=f"Формат {ext} не поддерживается"))
+    path = os.path.join(UPLOAD_FOLDER, f"costref_{session['user_id']}_{file.filename}")
+    file.save(path)
+    try:
+        norm = Normalizer()
+        df_raw = norm.load(path)
+        cols_lower = {c.lower().strip(): c for c in df_raw.columns}
+        sku_col = cols_lower.get("sku_or_article") or cols_lower.get("sku") or cols_lower.get("артикул")
+        cost_col = cols_lower.get("cost_price") or cols_lower.get("unit_cost") or cols_lower.get("себестоимость")
+        if not sku_col or not cost_col:
+            return redirect(url_for("cost_reference_page",
+                err="Не найдены колонки sku_or_article/cost_price (или их аналоги) в файле"))
+        pairs = list(zip(df_raw[sku_col], pd.to_numeric(df_raw[cost_col], errors="coerce")))
+        count = upsert_cost_reference(session["user_id"], pairs)
+        return redirect(url_for("cost_reference_page", msg=f"Обновлено {count} SKU"))
+    except Exception as e:
+        return redirect(url_for("cost_reference_page", err=f"Ошибка обработки: {str(e)}"))
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def safe_val(v):
     try:
@@ -421,7 +496,8 @@ def upload():
         # RFM/margin/cohorts считаются один раз, используются и для таблиц
         # в UI, и для контекста AI Insights - не дублируем вызовы модулей
         rfm_df = rfm_sku_analysis(df)
-        margin_df = margin_analysis(df)
+        cost_df = get_cost_reference_df(session['user_id'])
+        margin_df = margin_analysis(df, cost_df=cost_df)
         cohort_df = product_lifecycle_cohort(df)
 
         rfm_table = rfm_df.to_dict('records') if not rfm_df.empty else []

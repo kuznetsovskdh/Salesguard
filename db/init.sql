@@ -44,3 +44,14 @@ CREATE TABLE IF NOT EXISTS value_verdicts (
 CREATE INDEX idx_sales_upload ON sales(upload_id);
 CREATE INDEX idx_sales_date ON sales(sale_date);
 CREATE INDEX idx_verdicts_upload ON value_verdicts(upload_id);
+
+CREATE TABLE IF NOT EXISTS cost_reference (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id),
+    sku         VARCHAR(255) NOT NULL,
+    unit_cost   NUMERIC(12,2) NOT NULL,
+    updated_at  TIMESTAMP DEFAULT NOW(),
+    UNIQUE (user_id, sku)
+);
+
+CREATE INDEX idx_cost_reference_user ON cost_reference(user_id);
