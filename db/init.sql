@@ -55,3 +55,27 @@ CREATE TABLE IF NOT EXISTS cost_reference (
 );
 
 CREATE INDEX idx_cost_reference_user ON cost_reference(user_id);
+
+CREATE TABLE IF NOT EXISTS stock_levels (
+    id            SERIAL PRIMARY KEY,
+    user_id       INTEGER REFERENCES users(id),
+    sku           VARCHAR(255) NOT NULL,
+    current_stock NUMERIC(12,2) NOT NULL,
+    report_date   DATE,
+    updated_at    TIMESTAMP DEFAULT NOW(),
+    UNIQUE (user_id, sku)
+);
+
+CREATE INDEX idx_stock_levels_user ON stock_levels(user_id);
+
+CREATE TABLE IF NOT EXISTS product_ratings (
+    id                       SERIAL PRIMARY KEY,
+    user_id                  INTEGER REFERENCES users(id),
+    usefulness               SMALLINT,
+    informativeness          SMALLINT,
+    accuracy                 SMALLINT,
+    interface_intuitiveness  SMALLINT,
+    ai_insight_usefulness    SMALLINT,
+    skipped                  BOOLEAN DEFAULT FALSE,
+    created_at               TIMESTAMP DEFAULT NOW()
+);

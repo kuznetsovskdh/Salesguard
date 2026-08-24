@@ -2,165 +2,358 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Результат анализа</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SellerTeller — Результат анализа</title>
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 1100px; margin: 30px auto; padding: 0 20px; }
-    h1 { color: #2E75B6; }
-    h2 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 6px; }
-    .stats { display: flex; gap: 16px; margin-bottom: 24px; }
-    .stat-card { background: #f0f6ff; border-radius: 8px; padding: 16px 24px; flex: 1; text-align: center; }
-    .stat-card .val { font-size: 28px; font-weight: bold; color: #2E75B6; }
-    .stat-card .lbl { font-size: 12px; color: #888; margin-top: 4px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { padding: 8px 12px; border: 1px solid #ddd; font-size: 13px; }
-    th { background: #2E75B6; color: white; }
-    tr:nth-child(even) { background: #f5f5f5; }
-    a { color: #2E75B6; }
-  </style>
+  <script>
+    function darkPlot(id, fig){
+      fig.layout = fig.layout || {};
+      fig.layout.paper_bgcolor = 'rgba(0,0,0,0)';
+      fig.layout.plot_bgcolor = 'rgba(0,0,0,0)';
+      fig.layout.font = {family:'IBM Plex Mono, monospace', color:'#8f8fb0', size:11};
+      fig.layout.xaxis = Object.assign({gridcolor:'rgba(255,255,255,0.06)', zerolinecolor:'rgba(255,255,255,0.12)', linecolor:'rgba(255,255,255,0.12)'}, fig.layout.xaxis||{});
+      fig.layout.yaxis = Object.assign({gridcolor:'rgba(255,255,255,0.06)', zerolinecolor:'rgba(255,255,255,0.12)', linecolor:'rgba(255,255,255,0.12)'}, fig.layout.yaxis||{});
+      fig.layout.margin = fig.layout.margin || {t:36,r:16,b:36,l:48};
+      fig.layout.legend = Object.assign({font:{color:'#8f8fb0'}}, fig.layout.legend||{});
+      Plotly.newPlot(id, fig.data, fig.layout, {displayModeBar:false, responsive:true});
+    }
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <h1>Результат анализа</h1>
-  {% if warning %}
-  <div style="background:#fff5f5;border-left:5px solid #dc3545;border-radius:6px;
-              padding:12px 16px;margin-bottom:16px;font-size:13px;color:#721c24">
-    <b>⚠ Предупреждение</b><br>{{ warning }}
-  </div>
-  {% endif %}
-  <p>
-    <a href="/"> Загрузить новый файл</a>
-    &nbsp;|&nbsp;
-    {% if upload_id %}
-    <a href="/download/{{ upload_id }}" style="background:#28a745;color:#fff;padding:5px 14px;border-radius:4px;text-decoration:none;font-size:13px"> Скачать данные в формате XLSX</a>
-    {% endif %}
-    {% if session.is_admin %}
-    &nbsp;|&nbsp; <a href="/admin" style="color:#2E75B6"> Панель admin</a>
-    {% endif %}
-  </p>
+<canvas id="gravity-canvas"></canvas>
 
-  {% if insights %}
-  <h2>🤖 AI Insights</h2>
-  <div style="background:#f0f6ff;border-left:4px solid #2E75B6;border-radius:6px;padding:14px 18px;margin-bottom:20px;line-height:1.6;font-size:14px">
-    {{ insights }}
-  </div>
-  {% endif %}
-
-  <h2>Сводная статистика</h2>
-  <div class="stats">
-    <div class="stat-card"><div class="val">{{ stats.rows }}</div><div class="lbl">Строк</div></div>
-    <div class="stat-card"><div class="val">{{ "%.0f"|format(stats.revenue_total) }}</div><div class="lbl">Выручка</div></div>
-    <div class="stat-card"><div class="val">{{ "%.0f"|format(stats.avg_check) }}</div><div class="lbl">Средний чек</div></div>
-    <div class="stat-card"><div class="val">{{ stats.products }}</div><div class="lbl">Товаров</div></div>
-  </div>
-
-  {% if charts.seasonality %}
-  <h2>Выручка по месяцам</h2>
-  <div id="ch_sea"></div>
-  <script>Plotly.newPlot("ch_sea", {{ charts.seasonality|safe }})</script>
-  {% endif %}
-
-  {% if charts.abc %}
-  <h2>ABC-анализ товаров</h2>
-  <div id="ch_abc"></div>
-  <script>Plotly.newPlot("ch_abc", {{ charts.abc|safe }})</script>
-  {% endif %}
-
-  {% if charts.clusters %}
-  <h2>Кластеры клиентов (K-Means)</h2>
-  <div id="ch_cl"></div>
-  <script>Plotly.newPlot("ch_cl", {{ charts.clusters|safe }})</script>
-  {% endif %}
-
-  {% if forecast_charts %}
-  <h2>Прогноз продаж (топ-3 товара, 30 дней)</h2>
-  {% for sku, chart_json in forecast_charts.items() %}
-  <div id="ch_forecast_{{ loop.index }}"></div>
-  <script>Plotly.newPlot("ch_forecast_{{ loop.index }}", {{ chart_json|safe }})</script>
-  {% endfor %}
-  {% endif %}
-
-  {% if anomalies_by_sku %}
-  <h2>Обнаруженные аномалии продаж</h2>
-  {% for sku, anomalies in anomalies_by_sku.items() %}
-  <h3 style="font-size:15px;color:#666;margin-top:16px">{{ sku }}</h3>
-  <table>
-    <tr><th>Дата</th><th>Значение</th><th>Локальный тренд</th><th>Тип</th></tr>
-    {% for a in anomalies %}
-    <tr>
-      <td>{{ a.date.strftime('%d.%m.%Y') if a.date else '' }}</td>
-      <td>{{ '%.0f'|format(a.value) }}</td>
-      <td>{{ '%.1f'|format(a.local_trend) if a.local_trend is not none else '—' }}</td>
-      <td style="color:{{ '#dc3545' if a.type == 'spike' else '#856404' }}">{{ 'всплеск' if a.type == 'spike' else 'провал' }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% endfor %}
-  {% endif %}
-
-  {% if rfm_table %}
-  <h2>RFM-сегментация товаров</h2>
-  <table>
-    <tr><th>Товар</th><th>Recency</th><th>Frequency</th><th>Monetary</th><th>Сегмент</th></tr>
-    {% for row in rfm_table %}
-    <tr>
-      <td>{{ row.product }}</td>
-      <td>{{ row.recency }}</td>
-      <td>{{ row.frequency }}</td>
-      <td>{{ '%.0f'|format(row.monetary) }}</td>
-      <td>{{ row.segment }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% endif %}
-
-  {% if margin_table %}
-  <h2>Маржинальность по товарам</h2>
-  <table>
-    <tr><th>Товар</th><th>Выручка</th><th>Маржа L1</th><th>Маржа L1, %</th>
-        {% if margin_table[0].margin_l2 is not none %}<th>Маржа L2</th><th>Маржа L2, %</th>{% endif %}</tr>
-    {% for row in margin_table %}
-    <tr>
-      <td>{{ row.product }}</td>
-      <td>{{ '%.0f'|format(row.revenue) }}</td>
-      <td>{{ '%.0f'|format(row.margin_l1) }}</td>
-      <td>{{ '%.1f'|format(row.margin_l1_pct * 100) if row.margin_l1_pct is not none else '—' }}</td>
-      {% if row.margin_l2 is not none %}
-      <td>{{ '%.0f'|format(row.margin_l2) }}</td>
-      <td>{{ '%.1f'|format(row.margin_l2_pct * 100) if row.margin_l2_pct is not none else '—' }}</td>
-      {% elif margin_table[0].margin_l2 is not none %}
-      <td>—</td><td>—</td>
+<div class="page-content">
+  <nav class="navbar">
+    <a class="navbar-brand" href="/">Seller<span>Teller</span></a>
+    <div class="navbar-links">
+      <a class="nav-link" href="/">Home</a>
+      <a class="nav-link" href="/cost-reference">Cost Reference</a>
+      <a class="nav-link" href="/stock">Stock</a>
+      {% if session.is_admin %}
+      <a class="nav-link" href="/debug-page">Debug</a>
+      <a class="nav-link" href="/admin">Admin</a>
       {% endif %}
-    </tr>
-    {% endfor %}
-  </table>
-  {% endif %}
+    </div>
+    <div class="navbar-user">
+      {% if session.username %}
+        <span>{{ session.username }}</span>
+        {% if session.is_admin %}<span class="badge-role">ADMIN</span>{% endif %}
+        <a class="nav-link danger" href="/logout">Logout</a>
+      {% endif %}
+    </div>
+  </nav>
 
-  {% if cohort_table %}
-  <h2>Товарные когорты (retention по месяцам)</h2>
-  <table>
-    <tr>
-      {% for col in cohort_columns %}<th>{{ col }}</th>{% endfor %}
-    </tr>
-    {% for row in cohort_table %}
-    <tr>
-      {% for col in cohort_columns %}
-      <td>{{ '%.1f'|format(row[col]) + '%' if row[col] is not none and col != 'cohort' else (row[col] if row[col] is not none else '—') }}</td>
-      {% endfor %}
-    </tr>
-    {% endfor %}
-  </table>
-  {% endif %}
+  <main class="main">
+    <h1 class="page-title">Результат <span>анализа</span></h1>
 
-  <h2>Маппинг колонок</h2>
-  <table>
-    <tr><th>Исходная колонка</th><th>Роль</th><th>Уверенность</th></tr>
-    {% for col, (role, conf) in role_map.items() %}
-    <tr>
-      <td>{{ col }}</td>
-      <td>{{ role or '' }}</td>
-      <td>{{ '%.0f'|format(conf*100) }}%</td>
-    </tr>
+    <div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap">
+      <a class="btn btn-outline" href="/">Загрузить новый файл</a>
+      {% if upload_id %}
+      <a class="btn btn-primary" href="/download/{{ upload_id }}">Скачать данные в формате XLSX</a>
+      {% endif %}
+      {% if session.is_admin %}
+      <a class="btn btn-outline" href="/admin">Панель admin</a>
+      {% endif %}
+    </div>
+
+    {% if warning %}
+    <div class="alert alert-warn">⚠ {{ warning }}</div>
+    {% endif %}
+
+    {% if insights %}
+    <div class="section-label">AI Insights</div>
+    <div class="card" style="margin-bottom:28px;border-left:3px solid var(--accent);line-height:1.7;font-size:13px">
+      {{ insights }}
+    </div>
+    {% endif %}
+
+    <div class="section-label">Сводная статистика</div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value">{{ stats.rows }}</div><div class="stat-label">Строк</div></div>
+      <div class="stat-card"><div class="stat-value">{{ "%.0f"|format(stats.revenue_total) }}</div><div class="stat-label">Выручка</div></div>
+      <div class="stat-card"><div class="stat-value">{{ "%.0f"|format(stats.avg_check) }}</div><div class="stat-label">Средний чек</div></div>
+      <div class="stat-card"><div class="stat-value">{{ stats.products }}</div><div class="stat-label">Товаров</div></div>
+    </div>
+
+    {% if charts.seasonality %}
+    <div class="section-label">Выручка по месяцам</div>
+    <div class="card" style="margin-bottom:28px"><div id="ch_sea"></div></div>
+    <script>darkPlot("ch_sea", {{ charts.seasonality|safe }})</script>
+    {% endif %}
+
+    {% if charts.abc %}
+    <div class="section-label">ABC-анализ товаров</div>
+    <div class="card" style="margin-bottom:28px"><div id="ch_abc"></div></div>
+    <script>darkPlot("ch_abc", {{ charts.abc|safe }})</script>
+    {% endif %}
+
+    {% if charts.clusters %}
+    <div class="section-label">Кластеры клиентов (K-Means)</div>
+    <div class="card" style="margin-bottom:28px"><div id="ch_cl"></div></div>
+    <script>darkPlot("ch_cl", {{ charts.clusters|safe }})</script>
+    {% endif %}
+
+    {% if forecast_charts %}
+    <div class="section-label">Прогноз продаж (топ-3 товара, 30 дней)</div>
+    {% for sku, chart_json in forecast_charts.items() %}
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:12px;color:var(--text-dim);margin-bottom:8px">{{ sku }}</div>
+      <div id="ch_forecast_{{ loop.index }}"></div>
+    </div>
+    <script>darkPlot("ch_forecast_{{ loop.index }}", {{ chart_json|safe }})</script>
     {% endfor %}
-  </table>
+    {% endif %}
+
+    {% if anomalies_by_sku %}
+    <div class="section-label" style="margin-top:12px">Обнаруженные аномалии продаж</div>
+    {% for sku, anomalies in anomalies_by_sku.items() %}
+    <div style="font-family:var(--mono);font-size:12px;color:var(--text-dim);margin:14px 0 8px">{{ sku }}</div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+      <table class="data-table">
+        <thead><tr><th>Дата</th><th>Значение</th><th>Локальный тренд</th><th>Тип</th></tr></thead>
+        <tbody>
+          {% for a in anomalies %}
+          <tr>
+            <td>{{ a.date.strftime('%d.%m.%Y') if a.date else '' }}</td>
+            <td>{{ '%.0f'|format(a.value) }}</td>
+            <td>{{ '%.1f'|format(a.local_trend) if a.local_trend is not none else '—' }}</td>
+            <td style="color:{{ 'var(--danger)' if a.type == 'spike' else 'var(--warn)' }}">{{ 'всплеск' if a.type == 'spike' else 'провал' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if stock_charts %}
+    <div class="section-label" style="margin-top:12px">Прогноз остатков (30 дней)</div>
+    {% for sku, chart_json in stock_charts.items() %}
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:12px;color:var(--text-dim);margin-bottom:8px">
+        {{ sku }}
+        {% if stockout_dates[sku] %}
+        <span style="color:var(--danger)">— закончится {{ stockout_dates[sku] }}</span>
+        {% else %}
+        <span style="color:var(--accent)">— запаса хватает на 30+ дней</span>
+        {% endif %}
+      </div>
+      <div id="ch_stock_{{ loop.index }}"></div>
+    </div>
+    <script>darkPlot("ch_stock_{{ loop.index }}", {{ chart_json|safe }})</script>
+    {% endfor %}
+    {% endif %}
+
+    {% if rfm_table %}
+    <div class="section-label" style="margin-top:12px">RFM-сегментация товаров</div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:28px">
+      <table class="data-table">
+        <thead><tr><th>Товар</th><th>Recency</th><th>Frequency</th><th>Monetary</th><th>Сегмент</th></tr></thead>
+        <tbody>
+          {% for row in rfm_table %}
+          <tr>
+            <td>{{ row.product }}</td>
+            <td>{{ row.recency }}</td>
+            <td>{{ row.frequency }}</td>
+            <td>{{ '%.0f'|format(row.monetary) }}</td>
+            <td>{{ row.segment }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if margin_table %}
+    <div class="section-label">Маржинальность по товарам</div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:28px">
+      <table class="data-table">
+        <thead>
+          <tr><th>Товар</th><th>Выручка</th><th>Маржа L1</th><th>Маржа L1, %</th>
+              {% if margin_table[0].margin_l2 is not none %}<th>Маржа L2</th><th>Маржа L2, %</th>{% endif %}</tr>
+        </thead>
+        <tbody>
+          {% for row in margin_table %}
+          <tr>
+            <td>{{ row.product }}</td>
+            <td>{{ '%.0f'|format(row.revenue) }}</td>
+            <td>{{ '%.0f'|format(row.margin_l1) }}</td>
+            <td>{{ '%.1f'|format(row.margin_l1_pct * 100) if row.margin_l1_pct is not none else '—' }}</td>
+            {% if row.margin_l2 is not none %}
+            <td>{{ '%.0f'|format(row.margin_l2) }}</td>
+            <td>{{ '%.1f'|format(row.margin_l2_pct * 100) if row.margin_l2_pct is not none else '—' }}</td>
+            {% elif margin_table[0].margin_l2 is not none %}
+            <td>—</td><td>—</td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if cohort_table %}
+    <div class="section-label">Товарные когорты (retention по месяцам)</div>
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:28px">
+      <table class="data-table">
+        <thead>
+          <tr>{% for col in cohort_columns %}<th>{{ col }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in cohort_table %}
+          <tr>
+            {% for col in cohort_columns %}
+            <td>{{ '%.1f'|format(row[col]) + '%' if row[col] is not none and col != 'cohort' else (row[col] if row[col] is not none else '—') }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="section-label">Маппинг колонок</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table">
+        <thead><tr><th>Исходная колонка</th><th>Роль</th><th>Уверенность</th></tr></thead>
+        <tbody>
+          {% for col, (role, conf) in role_map.items() %}
+          <tr>
+            <td>{{ col }}</td>
+            <td>{{ role or '' }}</td>
+            <td>{{ '%.0f'|format(conf*100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+{% if is_first_analysis %}
+<div class="rating-overlay" id="rating-overlay">
+  <div class="dvd-bar" id="rating-dvd-bar"></div>
+  <div class="auth-card rating-card">
+    <div class="auth-logo">SellerTeller</div>
+    <p class="rating-intro">Можете пожалуйста оценить наш продукт от 1 до 5</p>
+
+    <div class="rating-row" data-key="usefulness">
+      <span class="rating-label">Общая полезность данного продукта для вас</span>
+      <div class="stars">
+        {% for i in range(1,6) %}<span class="star" data-val="{{ i }}">★</span>{% endfor %}
+      </div>
+    </div>
+    <div class="rating-row" data-key="informativeness">
+      <span class="rating-label">Информативность анализа</span>
+      <div class="stars">
+        {% for i in range(1,6) %}<span class="star" data-val="{{ i }}">★</span>{% endfor %}
+      </div>
+    </div>
+    <div class="rating-row" data-key="accuracy">
+      <span class="rating-label">Точность анализа</span>
+      <div class="stars">
+        {% for i in range(1,6) %}<span class="star" data-val="{{ i }}">★</span>{% endfor %}
+      </div>
+    </div>
+    <div class="rating-row" data-key="interface_intuitiveness">
+      <span class="rating-label">Интуитивность интерфейса</span>
+      <div class="stars">
+        {% for i in range(1,6) %}<span class="star" data-val="{{ i }}">★</span>{% endfor %}
+      </div>
+    </div>
+    <div class="rating-row" data-key="ai_insight_usefulness">
+      <span class="rating-label">Полезность ИИ инсайта</span>
+      <div class="stars">
+        {% for i in range(1,6) %}<span class="star" data-val="{{ i }}">★</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="rating-actions">
+      <button class="btn btn-primary" id="rating-submit" type="button" style="width:100%;justify-content:center">Отправить оценку</button>
+      <a href="#" id="rating-skip" class="rating-skip">Пропустить</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script src="/static/gravity.js"></script>
+
+{% if is_first_analysis %}
+<script>
+(function(){
+  const overlay = document.getElementById('rating-overlay');
+  let rated = false, pendingHref = null, stopBounce = null;
+  const ratings = {};
+
+  function openModal(href){
+    pendingHref = href;
+    overlay.classList.add('show');
+    stopBounce = window.startDvdBounce(document.getElementById('rating-dvd-bar'));
+  }
+  function closeModal(){
+    overlay.classList.remove('show');
+    if(stopBounce) stopBounce();
+  }
+  function proceed(){
+    closeModal();
+    if(pendingHref) window.location.href = pendingHref;
+  }
+  function sendRating(payload){
+    return fetch('/rate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+  }
+
+  document.querySelectorAll('a[href]').forEach(function(a){
+    a.addEventListener('click', function(e){
+      if(rated) return;
+      const href = this.getAttribute('href');
+      if(!href || href.startsWith('#')) return;
+      e.preventDefault();
+      openModal(this.href);
+    });
+  });
+
+  document.querySelectorAll('.rating-row').forEach(function(row){
+    const stars = row.querySelectorAll('.star');
+    stars.forEach(function(s){
+      s.addEventListener('click', function(){
+        const val = +s.dataset.val;
+        ratings[row.dataset.key] = val;
+        row.classList.remove('rating-missing');
+        stars.forEach(function(st){ st.classList.toggle('selected', +st.dataset.val <= val); });
+      });
+      s.addEventListener('mouseenter', function(){
+        const val = +s.dataset.val;
+        stars.forEach(function(st){ st.classList.toggle('hover', +st.dataset.val <= val); });
+      });
+      s.addEventListener('mouseleave', function(){
+        stars.forEach(function(st){ st.classList.remove('hover'); });
+      });
+    });
+  });
+
+  document.getElementById('rating-submit').addEventListener('click', function(){
+    const keys = ['usefulness','informativeness','accuracy','interface_intuitiveness','ai_insight_usefulness'];
+    const missing = keys.filter(function(k){ return !ratings[k]; });
+    if(missing.length){
+      document.querySelectorAll('.rating-row').forEach(function(row){
+        if(!ratings[row.dataset.key]) row.classList.add('rating-missing');
+      });
+      return;
+    }
+    sendRating(ratings).finally(function(){ rated = true; proceed(); });
+  });
+
+  document.getElementById('rating-skip').addEventListener('click', function(e){
+    e.preventDefault();
+    sendRating({skipped: true}).finally(function(){ rated = true; proceed(); });
+  });
+})();
+</script>
+{% endif %}
 </body>
 </html>

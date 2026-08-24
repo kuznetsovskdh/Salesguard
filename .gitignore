@@ -10,3 +10,4 @@ tests/test_wb_style.json
 venv/
 .env
 app/.env
+CLAUDE.md

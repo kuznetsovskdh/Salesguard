@@ -94,3 +94,48 @@ def forecast_revenue(df: pd.DataFrame, product: str = None, horizon_days: int = 
         'date': future_dates,
         'forecast': forecast_values,
     })
+
+
+def forecast_stock(sales_df: pd.DataFrame, stock_df: pd.DataFrame, product: str = None,
+                    horizon_days: int = 30) -> pd.DataFrame:
+    """Прогноз исчерпания остатка товара: burn rate (скорость расхода,
+    шт/день) из истории продаж минус текущий остаток -> кривая остатка по
+    дням. Дата стокаута не возвращается отдельным полем - вызывающий код
+    берёт первую строку с remaining_stock <= 0, как это уже принято для
+    аномалий/прогноза выручки в этом модуле.
+    """
+    if product is None or stock_df is None or stock_df.empty:
+        return pd.DataFrame()
+
+    daily = _build_daily_series(sales_df, product)
+    if daily.empty or len(daily) < 14:
+        return pd.DataFrame()
+
+    stock_row = stock_df[stock_df['sku_or_article'] == product]
+    if stock_row.empty:
+        return pd.DataFrame()
+    current_stock = float(stock_row['current_stock'].iloc[0])
+
+    smoothed = daily.ewm(span=14, adjust=False).mean()
+    trend_window = min(30, len(daily))
+    recent_raw = daily.iloc[-trend_window:]
+    x = np.arange(len(recent_raw))
+    slope, _ = np.polyfit(x, recent_raw.values, 1)
+    last_value = smoothed.iloc[-1]
+
+    future_dates = pd.date_range(
+        daily.index[-1] + pd.Timedelta(days=1), periods=horizon_days, freq='D'
+    )
+    burn_rate = [max(0, last_value + slope * (i + 1)) for i in range(horizon_days)]
+
+    remaining = current_stock
+    remaining_stock = []
+    for burn in burn_rate:
+        remaining = max(0, remaining - burn)
+        remaining_stock.append(remaining)
+
+    return pd.DataFrame({
+        'date': future_dates,
+        'burn_rate': burn_rate,
+        'remaining_stock': remaining_stock,
+    })

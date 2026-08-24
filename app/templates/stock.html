@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SellerTeller — Cost Reference</title>
+  <title>SellerTeller — Stock</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -31,11 +31,12 @@
   </nav>
 
   <main class="main">
-    <h1 class="page-title">Cost <span>Reference</span></h1>
+    <h1 class="page-title">Stock <span>Levels</span></h1>
     <p style="color:var(--text-dim);font-family:var(--mono);font-size:12px;margin-bottom:20px">
-      Справочник себестоимости (SKU → закупочная цена) для Margin Layer 2.
-      Загрузка обновляет существующие SKU и добавляет новые — старые записи,
-      которых нет в новом файле, не удаляются.
+      Снапшот остатков (SKU → количество на складах) для прогноза исчерпания запаса.
+      Загрузите отчёт об остатках WB или Ozon — данные по складам суммируются в один
+      текущий остаток на SKU. Каждая загрузка обновляет существующие SKU и добавляет
+      новые — старые записи не удаляются.
     </p>
 
     {% if msg %}
@@ -46,25 +47,25 @@
     {% endif %}
 
     <div class="card" style="margin-bottom:28px">
-      <form action="/cost-reference/upload" method="post" enctype="multipart/form-data">
+      <form action="/stock/upload" method="post" enctype="multipart/form-data">
         <div class="upload-zone">
-          <span class="upload-zone-label">csv · xlsx · json · txt · колонки: sku_or_article + cost_price</span>
+          <span class="upload-zone-label">csv · xlsx · json · txt · отчёт об остатках WB или Ozon</span>
           <input type="file" name="file" accept=".csv,.xlsx,.xls,.json,.txt">
         </div>
         <div style="text-align:center">
-          <button class="btn btn-primary" type="submit">Загрузить справочник</button>
+          <button class="btn btn-primary" type="submit">Загрузить остатки</button>
         </div>
       </form>
     </div>
 
     <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
       <span>
-        Текущий справочник
-        {% if last_updated %}<span style="color:var(--text-dim);font-weight:400">— обновлён {{ last_updated }}</span>{% endif %}
+        Текущие остатки
+        {% if last_updated %}<span style="color:var(--text-dim);font-weight:400">— обновлены {{ last_updated }}</span>{% endif %}
       </span>
       {% if entries %}
-      <form action="/cost-reference/clear" method="post" onsubmit="return confirm('Удалить весь справочник себестоимости?')">
-        <button class="btn btn-danger btn-sm" type="submit">Очистить справочник</button>
+      <form action="/stock/clear" method="post" onsubmit="return confirm('Удалить все загруженные остатки?')">
+        <button class="btn btn-danger btn-sm" type="submit">Очистить остатки</button>
       </form>
       {% endif %}
     </div>
@@ -73,13 +74,14 @@
     <div class="card" style="padding:0;overflow:hidden">
       <table class="data-table">
         <thead>
-          <tr><th>SKU</th><th>Себестоимость</th><th>Обновлено</th></tr>
+          <tr><th>SKU</th><th>Остаток, шт</th><th>Дата отчёта</th><th>Обновлено</th></tr>
         </thead>
         <tbody>
           {% for e in entries %}
           <tr>
             <td>{{ e.sku }}</td>
-            <td>{{ "%.2f"|format(e.unit_cost) }} ₽</td>
+            <td>{{ "%.0f"|format(e.current_stock) }}</td>
+            <td style="color:var(--text-dim)">{{ e.report_date }}</td>
             <td style="color:var(--text-dim)">{{ e.updated_at }}</td>
           </tr>
           {% endfor %}
@@ -87,7 +89,7 @@
       </table>
     </div>
     {% else %}
-    <div class="empty-state">справочник пуст — загрузите файл выше</div>
+    <div class="empty-state">остатки не загружены — загрузите файл выше</div>
     {% endif %}
   </main>
 </div>

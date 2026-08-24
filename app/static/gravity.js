@@ -84,3 +84,31 @@
   function loop(){ update(); draw(); requestAnimationFrame(loop); }
   loop();
 })();
+
+// Переиспользуемый DVD-bounce для .dvd-bar - используется и во время
+// "uploading to server" (index.html), и как фон рейтинг-модалки (result.html).
+// Визуально это прямой луч (длинная тонкая полоса), а не квадратный "лого" -
+// от DVD-анимации здесь только траектория (отражение от 4 стен экрана).
+// Столкновения считаются по осевому bounding-box'у (без вращения), а сам
+// элемент довдоворачивается transform:rotate() по направлению вектора
+// скорости, чтобы луч всегда "смотрел" туда, куда летит.
+window.startDvdBounce = function(el, opts){
+  opts = opts || {};
+  const speed = opts.speed || 3.9;
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let x = Math.random()*(window.innerWidth-w), y = Math.random()*(window.innerHeight-h);
+  let vx = (Math.random()<0.5?-1:1)*speed, vy = (Math.random()<0.5?-1:1)*speed*0.55;
+  let running = true;
+  (function step(){
+    if(!running) return;
+    x+=vx; y+=vy;
+    if(x<=0||x+w>=window.innerWidth) vx=-vx;
+    if(y<=0||y+h>=window.innerHeight) vy=-vy;
+    x=Math.max(0,Math.min(window.innerWidth-w,x));
+    y=Math.max(0,Math.min(window.innerHeight-h,y));
+    const angle=Math.atan2(vy,vx)*180/Math.PI;
+    el.style.transform=`translate(${x}px,${y}px) rotate(${angle}deg)`;
+    requestAnimationFrame(step);
+  })();
+  return function stop(){ running=false; };
+};

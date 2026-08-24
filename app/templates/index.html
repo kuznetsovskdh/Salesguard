@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>SalesGuard Analytics</title>
+  <title>SellerTeller Analytics</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -27,10 +27,11 @@
 
 <div class="page-content">
   <nav class="navbar">
-    <a class="navbar-brand" href="/">Sales<span>Guard</span></a>
+    <a class="navbar-brand" href="/">Seller<span>Teller</span></a>
     <div class="navbar-links">
       <a class="nav-link" href="/">Home</a>
       <a class="nav-link" href="/cost-reference">Cost Reference</a>
+      <a class="nav-link" href="/stock">Stock</a>
       {% if session.is_admin %}
       <a class="nav-link" href="/debug-page">Debug</a>
       <a class="nav-link" href="/admin">Admin</a>
@@ -46,7 +47,7 @@
   </nav>
 
   <main class="main">
-    <h1 class="page-title">Sales<span>Guard</span> Analytics</h1>
+    <h1 class="page-title">Seller<span>Teller</span> Analytics</h1>
 
     {% if warning %}
     <div class="alert alert-warn">⚠ {{ warning }}</div>
@@ -237,9 +238,9 @@
     function stackTop(p){
       let top=floor;
       pills.forEach(o=>{
-        if(o===p||!o.resting) return;
-        const dx=Math.abs(o.x-p.x);
-        if(dx<o.pw*0.7) top=Math.min(top, o.y-o.ph/2-p.ph/2-1);
+        if(o===p) return;
+        const halfSum=(o.pw+p.pw)/2-3;
+        if(Math.abs(o.x-p.x)<halfSum && o.y>p.y) top=Math.min(top, o.y-o.ph/2-p.ph/2-1);
       });
       return top;
     }

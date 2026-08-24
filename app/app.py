@@ -15,7 +15,7 @@ from analytics.cleaning import clean_data
 from analytics.features import add_features
 from analytics.abc import abc_analysis
 from analytics.seasonality import seasonality, product_lifecycle_cohort
-from analytics.forecast import forecast_revenue, detect_anomalies
+from analytics.forecast import forecast_revenue, detect_anomalies, forecast_stock
 from analytics.clustering import cluster_customers, rfm_sku_analysis
 from analytics.margin import margin_analysis
 from analytics.insights_context import build_metrics_context
@@ -146,6 +146,128 @@ def cost_reference_upload():
             os.remove(path)
         except Exception:
             pass
+
+@app.route("/cost-reference/clear", methods=["POST"])
+@login_required
+def cost_reference_clear():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('DELETE FROM cost_reference WHERE user_id=%s', (session['user_id'],))
+    conn.commit(); conn.close()
+    return redirect(url_for("cost_reference_page", msg="Справочник очищен"))
+
+
+SQL_UPSERT_STOCK = 'INSERT INTO stock_levels (user_id, sku, current_stock, report_date, updated_at) VALUES (%s,%s,%s,%s,NOW()) ON CONFLICT (user_id, sku) DO UPDATE SET current_stock=EXCLUDED.current_stock, report_date=EXCLUDED.report_date, updated_at=NOW()'
+SQL_SELECT_STOCK = 'SELECT sku, current_stock FROM stock_levels WHERE user_id=%s'
+SQL_SELECT_STOCK_ENTRIES = 'SELECT sku, current_stock, report_date, updated_at FROM stock_levels WHERE user_id=%s ORDER BY updated_at DESC'
+
+# ── STOCK (остатки WB/Ozon) ─────────────────────────────────────────────────────
+def get_stock_df(user_id):
+    """Текущий снапшот остатков пользователя как DataFrame
+    (sku_or_article, current_stock) - под контракт forecast_stock(stock_df=...)."""
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(SQL_SELECT_STOCK, (user_id,))
+    rows = cur.fetchall(); conn.close()
+    if not rows:
+        return None
+    rows = [(sku, float(stock)) for sku, stock in rows]
+    return pd.DataFrame(rows, columns=["sku_or_article", "current_stock"])
+
+def upsert_stock_levels(user_id, sku_stock_date_triples):
+    """Upsert по (user_id, sku): каждая загрузка - новый снапшот остатков,
+    старые SKU, отсутствующие в новом файле, не удаляются."""
+    conn = get_db(); cur = conn.cursor()
+    inserted = 0
+    for sku, stock, report_date in sku_stock_date_triples:
+        if sku is None or pd.isna(sku) or pd.isna(stock):
+            continue
+        cur.execute(SQL_UPSERT_STOCK, (user_id, str(sku).strip(), float(stock), report_date))
+        inserted += 1
+    conn.commit(); conn.close()
+    return inserted
+
+def parse_stock_file(df_raw):
+    """Лёгкий парсер остатков WB/Ozon - известные реальные названия колонок,
+    без прогона через Normalizer.detect_roles (формат остатков не товарный
+    по revenue, роль-детекция под него не заточена). Несколько строк на SKU
+    (разбивка по складам) агрегируются суммой."""
+    cols_lower = {str(c).lower().strip(): c for c in df_raw.columns}
+    if 'артикул поставщика' in cols_lower and 'остаток на конец периода, шт' in cols_lower:
+        sku_col = cols_lower['артикул поставщика']
+        stock_col = cols_lower['остаток на конец периода, шт']
+    elif 'артикул продавца' in cols_lower and 'остаток доступный к продаже, шт' in cols_lower:
+        sku_col = cols_lower['артикул продавца']
+        stock_col = cols_lower['остаток доступный к продаже, шт']
+    else:
+        raise ValueError(
+            'Не найдены колонки остатков WB ("Артикул поставщика" + '
+            '"Остаток на конец периода, шт") или Ozon ("Артикул продавца" + '
+            '"Остаток доступный к продаже, шт")'
+        )
+    work = df_raw[[sku_col, stock_col]].copy()
+    work.columns = ['sku', 'current_stock']
+    work['current_stock'] = pd.to_numeric(work['current_stock'], errors='coerce')
+    work = work.dropna(subset=['sku', 'current_stock'])
+    grouped = work.groupby('sku', as_index=False)['current_stock'].sum()
+
+    report_date = None
+    date_col = cols_lower.get('дата отчета')
+    if date_col:
+        parsed_dates = pd.to_datetime(df_raw[date_col], dayfirst=True, errors='coerce')
+        if parsed_dates.notna().any():
+            report_date = parsed_dates.dropna().iloc[0].date()
+    grouped['report_date'] = report_date
+    return grouped
+
+@app.route("/stock")
+@login_required
+def stock_page():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(SQL_SELECT_STOCK_ENTRIES, (session["user_id"],))
+    rows = cur.fetchall(); conn.close()
+    entries = [{"sku": r[0], "current_stock": float(r[1]),
+                "report_date": r[2].strftime("%d.%m.%Y") if r[2] else "—",
+                "updated_at": r[3].strftime("%d.%m.%Y %H:%M") if r[3] else ""} for r in rows]
+    last_updated = entries[0]["updated_at"] if entries else None
+    msg = request.args.get("msg")
+    err = request.args.get("err")
+    return render_template("stock.html", entries=entries,
+                           last_updated=last_updated, msg=msg, err=err)
+
+@app.route("/stock/upload", methods=["POST"])
+@login_required
+def stock_upload():
+    file = request.files.get("file")
+    if not file:
+        return redirect(url_for("stock_page", err="Файл не выбран"))
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED:
+        return redirect(url_for("stock_page", err=f"Формат {ext} не поддерживается"))
+    path = os.path.join(UPLOAD_FOLDER, f"stock_{session['user_id']}_{file.filename}")
+    file.save(path)
+    try:
+        norm = Normalizer()
+        df_raw = norm.load(path)
+        grouped = parse_stock_file(df_raw)
+        triples = list(zip(grouped["sku"], grouped["current_stock"], grouped["report_date"]))
+        count = upsert_stock_levels(session["user_id"], triples)
+        return redirect(url_for("stock_page", msg=f"Обновлено {count} SKU"))
+    except ValueError as e:
+        return redirect(url_for("stock_page", err=str(e)))
+    except Exception as e:
+        return redirect(url_for("stock_page", err=f"Ошибка обработки: {str(e)}"))
+    finally:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+@app.route("/stock/clear", methods=["POST"])
+@login_required
+def stock_clear():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('DELETE FROM stock_levels WHERE user_id=%s', (session['user_id'],))
+    conn.commit(); conn.close()
+    return redirect(url_for("stock_page", msg="Остатки очищены"))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -319,11 +441,14 @@ def admin_panel():
               'uploads':r[4]} for r in cur.fetchall()]
     cur.execute('SELECT COUNT(*) FROM uploads')
     total_uploads = cur.fetchone()[0]
+    cur.execute('SELECT COUNT(*) FROM product_ratings')
+    ratings_count = cur.fetchone()[0]
     conn.close()
     msg = request.args.get('msg')
     err = request.args.get('err')
     return render_template('admin.html', users=users, q=q,
-                           total_uploads=total_uploads, msg=msg, err=err)
+                           total_uploads=total_uploads, ratings_count=ratings_count,
+                           msg=msg, err=err)
 
 @app.route('/admin/role', methods=['POST'])
 @admin_required
@@ -350,6 +475,23 @@ def admin_delete_user():
     cur.execute('DELETE FROM users WHERE id=%s', (user_id,))
     conn.commit(); conn.close()
     return redirect(url_for('admin_panel', msg=f'Пользователь #{user_id} удалён'))
+
+@app.route('/admin/ratings/export')
+@admin_required
+def export_ratings():
+    conn = get_db(); cur = conn.cursor()
+    cur.execute('''SELECT r.id, u.username, r.usefulness, r.informativeness, r.accuracy,
+                   r.interface_intuitiveness, r.ai_insight_usefulness, r.skipped, r.created_at
+                   FROM product_ratings r LEFT JOIN users u ON u.id = r.user_id
+                   ORDER BY r.created_at DESC''')
+    rows = cur.fetchall(); conn.close()
+    df = pd.DataFrame(rows, columns=['id','username','usefulness','informativeness','accuracy',
+                                      'interface_intuitiveness','ai_insight_usefulness','skipped','created_at'])
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, sheet_name='ratings')
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name='ratings_export.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 # ── DOWNLOAD XLSX ─────────────────────────────────────────────────────────────
@@ -384,6 +526,35 @@ def download_xlsx(upload_id):
     return send_file(output, as_attachment=True,
                      download_name=f'{fname}_cleaned.xlsx',
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+# ── RATING (оценка продукта после первого анализа) ─────────────────────────────
+@app.route('/rate', methods=['POST'])
+@login_required
+def submit_rating():
+    data = request.get_json(silent=True) or {}
+    conn = get_db(); cur = conn.cursor()
+    if data.get('skipped'):
+        cur.execute('''INSERT INTO product_ratings (user_id, skipped) VALUES (%s, TRUE)''',
+                    (session['user_id'],))
+        conn.commit(); conn.close()
+        return jsonify({'ok': True})
+
+    keys = ['usefulness', 'informativeness', 'accuracy',
+            'interface_intuitiveness', 'ai_insight_usefulness']
+    values = []
+    for k in keys:
+        v = data.get(k)
+        if not isinstance(v, int) or not (1 <= v <= 5):
+            conn.close()
+            return jsonify({'ok': False, 'error': f'invalid {k}'}), 400
+        values.append(v)
+
+    cur.execute('''INSERT INTO product_ratings
+        (user_id, usefulness, informativeness, accuracy, interface_intuitiveness, ai_insight_usefulness)
+        VALUES (%s,%s,%s,%s,%s,%s)''', (session['user_id'], *values))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True})
 
 
 # ── MAIN ROUTES ───────────────────────────────────────────────────────────────
@@ -445,6 +616,8 @@ def upload():
                 role_map=role_map, upload_id=upload_id,
                 warning=error_text)
         df = clean_data(df_std); df = add_features(df)
+        cur.execute("SELECT COUNT(*) FROM uploads WHERE user_id=%s AND status='success'", (session['user_id'],))
+        is_first_analysis = cur.fetchone()[0] == 0
         cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,user_id)
             VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
             (file.filename,ext,len(df_raw),len(df),'success',session['user_id']))
@@ -479,7 +652,7 @@ def upload():
         charts = {}
         sea = seasonality(df)
         if not sea.empty:
-            fig = px.line(sea, x='month', y='revenue', color='year', title='Выручка по месяцам')
+            fig = px.line(sea, x='month', y='revenue', color='year', title='Выручка по месяцам', markers=True)
             charts['seasonality'] = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
         abc = abc_analysis(df)
         if not abc.empty:
@@ -519,6 +692,20 @@ def upload():
                 if not an_df.empty:
                     anomalies_by_sku[sku] = an_df.to_dict('records')
 
+        # Прогноз остатков: burn rate из истории продаж минус текущий склад
+        # (снапшот из /stock) - только для SKU, для которых загружены остатки
+        stock_charts = {}
+        stockout_dates = {}
+        stock_df = get_stock_df(session['user_id'])
+        if stock_df is not None and not stock_df.empty and not abc.empty:
+            for sku in top_skus:
+                st_df = forecast_stock(df, stock_df, product=sku, horizon_days=30)
+                if not st_df.empty:
+                    fig_st = px.line(st_df, x='date', y='remaining_stock', title=f'Прогноз остатка: {sku}')
+                    stock_charts[sku] = json.dumps(fig_st, cls=plotly.utils.PlotlyJSONEncoder)
+                    zero_rows = st_df[st_df['remaining_stock'] <= 0]
+                    stockout_dates[sku] = zero_rows['date'].iloc[0].strftime('%d.%m.%Y') if not zero_rows.empty else None
+
         # AI Insights: пробуем LLM, при любой ошибке тихо откатываемся на
         # шаблонный генератор
         try:
@@ -536,7 +723,9 @@ def upload():
                                insights=insights_text,
                                rfm_table=rfm_table, margin_table=margin_table,
                                cohort_table=cohort_table, cohort_columns=cohort_columns,
-                               forecast_charts=forecast_charts, anomalies_by_sku=anomalies_by_sku)
+                               forecast_charts=forecast_charts, anomalies_by_sku=anomalies_by_sku,
+                               stock_charts=stock_charts, stockout_dates=stockout_dates,
+                               is_first_analysis=is_first_analysis)
     except Exception as e:
         conn.rollback()
         try:
@@ -620,7 +809,12 @@ def debug():
         df_clean_raw = norm.apply_verdicts(df_raw, matrix, role_map)
         df_std = norm.to_standard(df_clean_raw, role_map)
         debug_cols = get_col_debug(df_raw)
+        report_type = detect_report_type(df_raw)
+        product_level = is_product_level_report(report_type)
         has_revenue = 'revenue' in df_std.columns and not df_std['revenue'].isna().all()
+        report_type_blocks_analysis = not product_level and report_type != 'unknown'
+        if report_type_blocks_analysis:
+            has_revenue = False
         stats = None; rows_clean = 0
         if has_revenue:
             df = clean_data(df_std); df = add_features(df)
@@ -629,7 +823,16 @@ def debug():
                      'avg_check':float(df['avg_check'].mean()) if 'avg_check' in df else 0,
                      'products':int(df['product'].nunique()) if 'product' in df and df['product'].notna().any() else 0}
         else:
-            status = 'no_revenue'; err_msg = 'Колонка revenue не найдена'
+            status = 'no_revenue'
+            if report_type_blocks_analysis:
+                err_msg = (
+                    f'Этот отчёт распознан как "{report_type}" — он не содержит '
+                    f'товарного разреза продаж (SKU + revenue), поэтому ABC/RFM/margin-'
+                    f'аналитика для него недоступна. Загрузите товарную детализацию '
+                    f'(например, отчёт о продажах/реализации) для полного анализа.'
+                )
+            else:
+                err_msg = 'Колонка revenue не найдена'
         cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,error_msg)
             VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
             (file.filename,ext,len(df_raw),rows_clean,status,err_msg))
