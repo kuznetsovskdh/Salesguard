@@ -16,7 +16,8 @@ ALIASES = {
                     "profit","total_revenue","total_sales","total_sale","gross",
                     "net_sales","net_revenue","sales","turnover","proceeds",
                     "вайлдберриз реализовал товар","реализовано на сумму",
-                    "к перечислению за товар","выкуплено","итого к начислению"],
+                    "к перечислению за товар","выкуплено","итого к начислению",
+                    "сумма","сумма продаж","сумма реализации"],
     "PRICE":       ["price","цена","стоим","cost","unit_price","unitprice","цена_руб",
                     "retail_price","price_per_unit","retail_price_withdisc"],
     "QUANTITY":    ["qty","quantity","объем","объём","объем_кг","кол","units_sold",
@@ -47,6 +48,9 @@ FORBIDDEN = {
                  "dependent","phone","internet","streaming","security","backup",
                  "protection","support","multiple","paperless","payment","gender",
                  "barcode","nm_id","chrt","rrd","rid","realizationreport",
+                 "артикул","поставки","поставка",
+                 "штраф","удержан","хранени","приемк","логистик",
+                 "комисси","вознагражд","доплат","возмещен",
                  "order_id","penalty","commission","spp","vw","reward","acquiring",
                  "rebill","logistic","return_amount","delivery_amount","additional",
                  "transaction_id","transactionid","invoice_no","invoiceno",
@@ -114,6 +118,56 @@ def detect_report_type(df: pd.DataFrame) -> str:
 
 def is_product_level_report(report_type: str) -> bool:
     return report_type in PRODUCT_LEVEL_REPORTS
+
+
+def detect_mixed_structure(df: pd.DataFrame, report_type: str = None) -> bool:
+    """Ищет внутри данных заголовок ДРУГОГО типа отчёта — склейку файлов.
+
+    Пользователи вручную сшивают в один лист товарную детализацию и периодную
+    сводку. Колонки берутся от первого фрагмента, а строки второго попадают в
+    аналитику как обычные продажи, давая бессмысленные агрегаты.
+
+    Важно: повторяющийся собственный заголовок — это норма (Ozon-реализация
+    штатно содержит блоки "Реализовано" и "Возвращено"), поэтому маркеры
+    самого файла и его же типа отчёта из проверки исключаются.
+    """
+    own_cols = {str(c).lower().strip() for c in df.columns}
+    # Маркеры чужих типов отчёта, которых нет среди собственных колонок файла
+    foreign = set()
+    for rtype, markers in REPORT_TYPE_MARKERS.items():
+        if rtype == report_type:
+            continue
+        for m in markers:
+            if not any(m in c for c in own_cols):
+                foreign.add(m)
+    if not foreign:
+        return False
+    # Колонки, которые в файле по сути числовые: текст в них - аномалия
+    numeric_cols = [c for c in df.columns
+                    if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.6]
+    if len(numeric_cols) < 3:
+        return False
+    # Склейкой считаем только совпадение ДВУХ независимых признаков:
+    # строка выглядит как заголовок (текстовые подписи в числовых колонках)
+    # И среди её подписей есть маркер другого типа отчёта. По отдельности
+    # каждый признак даёт ложные срабатывания на штатном многоблочном
+    # Ozon-отчёте, где шапка повторяется перед блоком "Возвращено".
+    for _, row in df.head(400).iterrows():
+        labels, has_foreign = 0, False
+        for col in numeric_cols:
+            val = row[col]
+            if not isinstance(val, str):
+                continue
+            v = val.strip()
+            if v and len(v) <= 40 and not any(ch.isdigit() for ch in v):
+                labels += 1
+        for val in row:
+            if isinstance(val, str) and any(m in val.lower() for m in foreign):
+                has_foreign = True
+                break
+        if labels >= 3 and has_foreign:
+            return True
+    return False
 
 
 # ── Return detection ────────────────────────────────────────────────────────
@@ -257,7 +311,13 @@ def name_score(name: str, role: str) -> float:
         a_norm = a.lower().replace(" ", "_")
         if a_norm == n:
             best = max(best, 1.0)
-        elif a_norm in n or n in a_norm:
+        elif a_norm in n:
+            # алиас целиком внутри имени колонки - надёжный сигнал
+            best = max(best, 0.75)
+        elif n in a_norm and len(n) >= 0.5 * len(a_norm):
+            # имя короче алиаса засчитываем, только если они сопоставимы по
+            # длине: иначе общее слово вроде "Сумма" ложно совпадало с
+            # "сумма комиссии" и блокировало колонку выручки как комиссию
             best = max(best, 0.75)
     return best
 
@@ -593,18 +653,27 @@ class Normalizer:
             return pd.read_json(path)
         # Список кодировок для попыток — всегда включаем надёжные fallback
         encodings = list(dict.fromkeys([enc, "utf-8", "latin-1", "cp1251", "utf-8-sig"]))
+        # Разделитель выбираем по МАКСИМУМУ колонок, а не по первому подходящему:
+        # внутри полей WB/Ozon-выгрузок встречаются запятые ("Продажа со скидкой,
+        # 5%"), поэтому чтение с запятой даёт 3 колонки вместо 31 - и раньше
+        # побеждало, потому что 3 > 1, так что верный ';' даже не проверялся.
+        best = None  # (кол-во колонок, sep, encoding)
         for sep in [",", ";", "\t", "|"]:
             for encoding in encodings:
                 try:
                     df = pd.read_csv(path, sep=sep, encoding=encoding,
                                      nrows=5, on_bad_lines="skip")
-                    if len(df.columns) > 1:
-                        return pd.read_csv(path, sep=sep, encoding=encoding,
-                                           on_bad_lines="skip", low_memory=False)
                 except UnicodeDecodeError:
                     continue
                 except Exception:
                     break
+                ncols = len(df.columns)
+                if ncols > 1 and (best is None or ncols > best[0]):
+                    best = (ncols, sep, encoding)
+                break  # кодировка подошла, другие для этого sep не нужны
+        if best is not None:
+            return pd.read_csv(path, sep=best[1], encoding=best[2],
+                               on_bad_lines="skip", low_memory=False)
         # Финальный fallback: latin-1 читает любой байт
         try:
             df = pd.read_csv(path, sep=None, engine="python",
@@ -617,21 +686,39 @@ class Normalizer:
         raise ValueError("Не удалось определить разделитель CSV")
 
     def _clean_currency(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Убирает символы валют из числовых колонок. Пропускает большие df."""
+        """Приводит числа в локальных форматах к машинному виду.
+
+        Покрывает символы валют ("1234,56 ₽"), пробел как разделитель тысяч
+        ("5 326,06", в т.ч. неразрывный) и запятую как десятичный разделитель.
+        Без этого колонка выручки оставалась текстовой, теряла роль REVENUE,
+        и её место молча занимала соседняя числовая колонка.
+
+        Колонка перезаписывается только если после нормализации она стала
+        разбираться в числа заметно лучше, чем до неё - иначе текстовые
+        колонки (названия товаров) остаются нетронутыми, а уже корректные
+        числа с точкой-десятичной не портятся.
+        """
         if len(df) > 10000:
             return df  # Пропускаем для производительности
-        currency_re = r"[₹$€£¥₩₽]"
-        sample_size = min(100, len(df))
+        junk_re = r"[₹$€£¥₩₽\s  ]"
         for col in df.columns:
             if df[col].dtype != object:
                 continue
-            # Быстрая проверка на образце
-            sample = df[col].dropna().head(sample_size).astype(str)
-            if not sample.str.contains(r"[₹$€£¥₩₽]", regex=True).any():
-                continue
-            cleaned = df[col].astype(str).str.replace(currency_re, "", regex=True)
-            numeric = pd.to_numeric(cleaned, errors="coerce")
-            if numeric.notna().mean() > 0.5:
+            raw = df[col].astype(str)
+            before = pd.to_numeric(raw, errors="coerce").notna().mean()
+            if before > 0.99:
+                continue  # уже чистые числа - не трогаем
+            cleaned = raw.str.replace(junk_re, "", regex=True)
+            has_comma = cleaned.str.contains(",", regex=False)
+            has_dot = cleaned.str.contains(".", regex=False)
+            # запятая-десятичная только когда точки в значении нет;
+            # если есть обе - запятая была разделителем тысяч
+            both = has_comma & has_dot
+            cleaned = cleaned.mask(both, cleaned.str.replace(",", "", regex=False))
+            cleaned = cleaned.mask(has_comma & ~has_dot,
+                                   cleaned.str.replace(",", ".", regex=False))
+            after = pd.to_numeric(cleaned, errors="coerce").notna().mean()
+            if after > 0.5 and after > before + 0.1:
                 df[col] = cleaned
         return df
 
@@ -679,8 +766,12 @@ class Normalizer:
             if role is None:
                 continue
             verdicts = [check_value(v, role) for v in df[col]]
-            if role in ("REVENUE", "QUANTITY", "PRICE"):
-                verdicts = iqr_pass(verdicts)
+            # IQR намеренно НЕ применяется к денежным/количественным колонкам:
+            # распределение выручки по товарам всегда тяжелохвостое (в этом и
+            # смысл ABC/Pareto), и лидер продаж закономерно выходит за границы
+            # IQR. Раньше это обнуляло выручку топового SKU и превращало
+            # рекордный день продаж в "провал" при детекции аномалий.
+            # Нечисловые/отрицательные значения по-прежнему ловит check_value().
             matrix[col] = verdicts
         return matrix
 
@@ -711,7 +802,26 @@ class Normalizer:
             cols = [(c, conf) for c, (r, conf) in role_map.items() if r == role]
             if not cols:
                 return None
-            if role == "PRODUCT" and len(cols) > 1:
+            if role == "REVENUE" and len(cols) > 1:
+                # Валовая выручка приоритетнее суммы к перечислению: последняя
+                # уже очищена от комиссии, и если взять её за revenue, то
+                # margin_l1 вычтет комиссию второй раз. Отбор по смыслу имени,
+                # а не по весам - confidence у нетто-колонки бывает выше.
+                payout_markers = ("к перечислению", "итого к начислению",
+                                  "к оплате", "к выплате")
+                def is_payout(col_name):
+                    return any(m in col_name.lower() for m in payout_markers)
+                # Отодвигаем нетто-колонку только если есть альтернатива, которую
+                # по имени действительно можно считать выручкой. Иначе рискуем
+                # уйти на случайную числовую колонку (код товара, штрафы),
+                # которая просто оказалась в кандидатах.
+                named_gross = [c for c in cols
+                               if not is_payout(c[0])
+                               and name_score(c[0], "REVENUE") >= 0.75]
+                if named_gross:
+                    cols = named_gross
+                best_col = max(cols, key=lambda x: x[1])[0]
+            elif role == "PRODUCT" and len(cols) > 1:
                 # tie-break: предпочитаем колонку, чьё имя явно про артикул/SKU -
                 # это надёжный бизнес-идентификатор для группировки, в отличие
                 # от "названия товара", которое к тому же реже используется
@@ -720,7 +830,11 @@ class Normalizer:
                 def article_score(col_name):
                     n = col_name.lower()
                     return 1 if any(m in n for m in article_markers) else 0
-                best_col = max(cols, key=lambda x: (x[1], article_score(x[0])))[0]
+                # Артикул важнее небольшой разницы в confidence: в англоязычной
+                # выгрузке "Product" (13 категорий) обходил "SKU code" (40
+                # артикулов) на 0.04 и подменял товарный разрез категорийным.
+                # Числовые ID сюда не попадают - PRODUCT их блокирует по dtype.
+                best_col = max(cols, key=lambda x: (article_score(x[0]), x[1]))[0]
             else:
                 best_col = max(cols, key=lambda x: x[1])[0]
             return df[best_col]

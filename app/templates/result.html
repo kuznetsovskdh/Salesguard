@@ -69,6 +69,13 @@
     {% endif %}
 
     <div class="section-label">Сводная статистика</div>
+    {% if intake and intake.rows_dropped > 0 %}
+    <p style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin:-4px 0 14px">
+      В анализ вошло {{ intake.rows_used }} из {{ intake.rows_total }} строк файла —
+      {{ intake.rows_dropped }} отброшено ({{ intake.drop_pct }}%): дубли, пустые
+      и нечитаемые значения в ключевых полях.
+    </p>
+    {% endif %}
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-value">{{ stats.rows }}</div><div class="stat-label">Строк</div></div>
       <div class="stat-card"><div class="stat-value">{{ "%.0f"|format(stats.revenue_total) }}</div><div class="stat-label">Выручка</div></div>
@@ -171,7 +178,7 @@
       <table class="data-table">
         <thead>
           <tr><th>Товар</th><th>Выручка</th><th>Маржа L1</th><th>Маржа L1, %</th>
-              {% if margin_table[0].margin_l2 is not none %}<th>Маржа L2</th><th>Маржа L2, %</th>{% endif %}</tr>
+              {% if has_margin_l2 %}<th>Маржа L2</th><th>Маржа L2, %</th>{% endif %}</tr>
         </thead>
         <tbody>
           {% for row in margin_table %}
@@ -180,11 +187,13 @@
             <td>{{ '%.0f'|format(row.revenue) }}</td>
             <td>{{ '%.0f'|format(row.margin_l1) }}</td>
             <td>{{ '%.1f'|format(row.margin_l1_pct * 100) if row.margin_l1_pct is not none else '—' }}</td>
-            {% if row.margin_l2 is not none %}
-            <td>{{ '%.0f'|format(row.margin_l2) }}</td>
-            <td>{{ '%.1f'|format(row.margin_l2_pct * 100) if row.margin_l2_pct is not none else '—' }}</td>
-            {% elif margin_table[0].margin_l2 is not none %}
-            <td>—</td><td>—</td>
+            {% if has_margin_l2 %}
+              {% if row.margin_l2 is not none %}
+              <td>{{ '%.0f'|format(row.margin_l2) }}</td>
+              <td>{{ '%.1f'|format(row.margin_l2_pct * 100) if row.margin_l2_pct is not none else '—' }}</td>
+              {% else %}
+              <td title="Себестоимость не загружена для этого SKU">—</td><td>—</td>
+              {% endif %}
             {% endif %}
           </tr>
           {% endfor %}

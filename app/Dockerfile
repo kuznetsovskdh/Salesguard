@@ -16,4 +16,7 @@ RUN mkdir -p /app/uploads
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
+# timeout 300 согласован с proxy_read_timeout в nginx: выгрузка у верхней
+# границы лимита (50 МБ / ~175k строк) обрабатывается дольше 120 с и раньше
+# роняла воркер по таймауту, отдавая пользователю голый 502
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "app:app"]

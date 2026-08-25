@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly
 import psycopg2
+from psycopg2.extras import execute_values
 from functools import wraps
 from flask import (Flask, request, render_template, jsonify,
                    session, redirect, url_for, send_file)
@@ -10,7 +11,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from normalizer import (Normalizer, profile, detect_type, classify_column,
                         score_revenue, score_price, score_quantity,
                         score_date, score_customer, score_product, score_dimension,
-                        detect_report_type, is_product_level_report)
+                        detect_report_type, is_product_level_report,
+                        detect_mixed_structure)
 from analytics.cleaning import clean_data
 from analytics.features import add_features
 from analytics.abc import abc_analysis
@@ -43,6 +45,10 @@ def not_found(e):
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 UPLOAD_FOLDER = '/app/uploads'
 ALLOWED = {'.csv', '.xlsx', '.xls', '.json', '.txt'}
+# Пороги для больших выгрузок: экспорт очищенного xlsx и полный журнал
+# "мусорных" значений на сотнях тысяч строк стоят десятки секунд каждый
+XLSX_EXPORT_MAX_ROWS = 50_000
+VERDICT_LOG_MAX_ROWS = 20_000
 
 
 # ── DB ────────────────────────────────────────────────────────────────────────
@@ -271,6 +277,38 @@ def stock_clear():
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def friendly_upload_error(exc):
+    """Техническое исключение -> текст, понятный продавцу.
+
+    Пользователь видел "File is not a zip file" и "'Артикул поставщика'" —
+    это ничего не говорит о том, что делать дальше.
+    """
+    msg = str(exc)
+    low = msg.lower()
+    if 'not a zip file' in low or 'badzipfile' in low or 'corrupt' in low:
+        return ('Файл повреждён и не читается как Excel. Откройте его в Excel, '
+                'пересохраните в формате .xlsx и загрузите заново.')
+    if isinstance(exc, KeyError) or 'no columns' in low or 'no data' in low:
+        return ('В файле нет данных для анализа — только заголовки или пустой лист. '
+                'Проверьте, что выгрузка содержит строки продаж.')
+    if 'разделитель' in low:
+        return ('Не удалось определить структуру CSV. Сохраните файл в формате '
+                '.xlsx или проверьте, что колонки разделены запятой, «;» или табуляцией.')
+    if 'слишком большой' in low or 'too large' in low:
+        return msg
+    return (f'Не удалось обработать файл: {msg}. Если проблема повторяется, '
+            f'загрузите выгрузку в формате .xlsx.')
+
+def records_no_nan(df):
+    """DataFrame -> список словарей, где NaN заменён на None.
+
+    Jinja-проверка `is not none` не отличает NaN от числа, поэтому без этой
+    замены пустые значения печатались в таблицах как литерал "nan".
+    """
+    if df is None or df.empty:
+        return []
+    return df.astype(object).where(df.notna(), None).to_dict('records')
+
 def safe_val(v):
     try:
         if pd.isna(v): return None
@@ -347,9 +385,12 @@ def build_text_log(upload, mapping, debug_cols, verdicts, stats=None):
             lines.append(f"  col={v['col']} row={v['row']} reason={v['reason']}")
     return "\n".join(lines)
 
-def build_logs(cur, limit=10):
+def build_logs(cur, user_id, limit=10):
+    # Логи строго по владельцу: без фильтра по user_id блок "Processing logs"
+    # на главной показывал файлы, ошибки и маппинг колонок чужих продавцов
     cur.execute('''SELECT id,filename,format,rows_total,rows_clean,status,error_msg,created_at
-                   FROM uploads ORDER BY created_at DESC LIMIT %s''', (limit,))
+                   FROM uploads WHERE user_id=%s
+                   ORDER BY created_at DESC LIMIT %s''', (user_id, limit))
     uploads = cur.fetchall()
     logs = []
     for u in uploads:
@@ -566,7 +607,7 @@ def index():
         'SELECT * FROM uploads WHERE user_id=%s ORDER BY created_at DESC LIMIT 20',
         (session['user_id'],))
     uploads = cur.fetchall()
-    logs = build_logs(cur, limit=10)
+    logs = build_logs(cur, session['user_id'], limit=10)
     conn.close()
     warning = request.args.get('warning')
     return render_template('index.html', uploads=uploads, logs=logs, warning=warning)
@@ -592,6 +633,21 @@ def upload():
         product_level = is_product_level_report(report_type)
         no_revenue = 'revenue' not in df_std.columns or df_std['revenue'].isna().all()
         report_type_blocks_analysis = not product_level and report_type != 'unknown'
+        mixed = detect_mixed_structure(df_raw, report_type)
+        if mixed:
+            error_text = (
+                'Похоже, в файле склеены два разных отчёта: внутри данных найден '
+                'второй заголовок. Аналитика по такой таблице даёт бессмысленные '
+                'суммы, поэтому она не выполнена. Разделите фрагменты на отдельные '
+                'файлы и загрузите товарную детализацию отдельно.')
+            cur.execute('''INSERT INTO uploads (filename,format,rows_total,rows_clean,status,error_msg,user_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
+                (file.filename,ext,len(df_raw),0,'no_revenue',error_text,session['user_id']))
+            upload_id = cur.fetchone()[0]
+            conn.commit()
+            return render_template('result.html', charts={},
+                stats={'rows':0,'revenue_total':0,'avg_check':0,'products':0},
+                role_map=role_map, upload_id=upload_id, warning=error_text)
         if no_revenue or report_type_blocks_analysis:
             if not product_level and report_type != 'unknown':
                 error_text = (
@@ -622,31 +678,34 @@ def upload():
             VALUES (%s,%s,%s,%s,%s,%s) RETURNING id''',
             (file.filename,ext,len(df_raw),len(df),'success',session['user_id']))
         upload_id = cur.fetchone()[0]
-        # Bulk insert для производительности
+        # Пакетная вставка одним запросом: executemany + iterrows на 175k строк
+        # не укладывались в таймаут воркера и роняли загрузку с 502
+        cols_needed = ['sale_date','product','quantity','unit_price','revenue','customer_id']
+        src = df.reindex(columns=cols_needed)
         rows_to_insert = [
-            (upload_id, safe_val(row.get('sale_date')),
-             safe_val(row.get('product')), safe_val(row.get('quantity')),
-             safe_val(row.get('unit_price')), safe_val(row.get('revenue')),
-             safe_val(row.get('customer_id')))
-            for _, row in df.iterrows()
+            (upload_id, *[safe_val(v) for v in rec])
+            for rec in src.itertuples(index=False, name=None)
         ]
-        cur.executemany('''INSERT INTO sales
+        execute_values(cur, '''INSERT INTO sales
             (upload_id,sale_date,product,quantity,unit_price,revenue,customer_id)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)''', rows_to_insert)
-        # Сохраняем очищенный оригинал для скачивания
-        try:
-            clean_path = os.path.join(UPLOAD_FOLDER, f"cleaned_{upload_id}.xlsx")
-            df_clean_raw.to_excel(clean_path, index=False)
-        except Exception:
-            pass
-        for col,(role,conf) in role_map.items():
-            cur.execute('INSERT INTO column_mapping (upload_id,source_col,mapped_role,confidence) VALUES (%s,%s,%s,%s)',
-                        (upload_id,col,role,round(conf*100,2)))
-        for col,verdicts in matrix.items():
-            for i,v in enumerate(verdicts):
-                if not v.is_valid:
-                    cur.execute('INSERT INTO value_verdicts (upload_id,column_name,row_index,is_valid,reason) VALUES (%s,%s,%s,%s,%s)',
-                                (upload_id,col,i,v.is_valid,v.reason))
+            VALUES %s''', rows_to_insert, page_size=1000)
+        # Очищенный оригинал для скачивания: на больших файлах запись xlsx
+        # занимает десятки секунд, поэтому пропускаем её
+        if len(df_clean_raw) <= XLSX_EXPORT_MAX_ROWS:
+            try:
+                clean_path = os.path.join(UPLOAD_FOLDER, f"cleaned_{upload_id}.xlsx")
+                df_clean_raw.to_excel(clean_path, index=False)
+            except Exception:
+                pass
+        execute_values(cur, 'INSERT INTO column_mapping (upload_id,source_col,mapped_role,confidence) VALUES %s',
+                       [(upload_id, col, role, round(conf*100,2))
+                        for col,(role,conf) in role_map.items()])
+        verdict_rows = [(upload_id, col, i, v.is_valid, v.reason)
+                        for col, verdicts in matrix.items()
+                        for i, v in enumerate(verdicts) if not v.is_valid]
+        if verdict_rows:
+            execute_values(cur, 'INSERT INTO value_verdicts (upload_id,column_name,row_index,is_valid,reason) VALUES %s',
+                           verdict_rows[:VERDICT_LOG_MAX_ROWS], page_size=1000)
         save_debug_profiles(cur, upload_id, debug_cols)
         conn.commit()
         charts = {}
@@ -665,6 +724,12 @@ def upload():
         stats = {'rows':len(df),'revenue_total':float(df['revenue'].sum()),
                  'avg_check':float(df['avg_check'].mean()) if 'avg_check' in df else 0,
                  'products':int(df['product'].nunique()) if 'product' in df and df['product'].notna().any() else 0}
+        # Пользователь должен видеть, сколько строк не дошло до аналитики:
+        # раньше дубли, пустые и повреждённые строки исчезали молча
+        rows_dropped = len(df_raw) - len(df)
+        intake = {'rows_total': len(df_raw), 'rows_used': len(df),
+                  'rows_dropped': max(0, rows_dropped),
+                  'drop_pct': round(max(0, rows_dropped) / len(df_raw) * 100, 1) if len(df_raw) else 0}
 
         # RFM/margin/cohorts считаются один раз, используются и для таблиц
         # в UI, и для контекста AI Insights - не дублируем вызовы модулей
@@ -673,9 +738,18 @@ def upload():
         margin_df = margin_analysis(df, cost_df=cost_df)
         cohort_df = product_lifecycle_cohort(df)
 
-        rfm_table = rfm_df.to_dict('records') if not rfm_df.empty else []
-        margin_table = margin_df.to_dict('records') if not margin_df.empty else []
-        cohort_table = cohort_df.to_dict('records') if not cohort_df.empty else []
+        # NaN -> None: в шаблоне проверка "is not none" не ловит NaN, из-за чего
+        # у товаров без себестоимости в колонке "Маржа L2" печаталось "nan"
+        rfm_table = records_no_nan(rfm_df)
+        margin_table = records_no_nan(margin_df)
+        cohort_table = records_no_nan(cohort_df)
+        # Колонки Маржи L2 показываем, если себестоимость известна хотя бы у
+        # одного товара. Раньше видимость решала первая строка таблицы: если
+        # у топового SKU не было себестоимости, весь слой L2 исчезал, хотя
+        # для остальных товаров он посчитан.
+        has_margin_l2 = ('margin_l2' in margin_df.columns
+                         and bool(margin_df['margin_l2'].notna().any())) \
+            if not margin_df.empty else False
         cohort_columns = list(cohort_df.columns) if not cohort_df.empty else []
 
         # Forecast/Anomaly: топ-3 SKU по выручке, прогноз 30 дней + аномалии
@@ -725,6 +799,7 @@ def upload():
                                cohort_table=cohort_table, cohort_columns=cohort_columns,
                                forecast_charts=forecast_charts, anomalies_by_sku=anomalies_by_sku,
                                stock_charts=stock_charts, stockout_dates=stockout_dates,
+                               has_margin_l2=has_margin_l2, intake=intake,
                                is_first_analysis=is_first_analysis)
     except Exception as e:
         conn.rollback()
@@ -736,7 +811,7 @@ def upload():
             pass
         return render_template('result.html', charts={},
             stats={'rows':0,'revenue_total':0,'avg_check':0,'products':0},
-            role_map={}, upload_id=None, warning=f'Ошибка обработки: {str(e)}')
+            role_map={}, upload_id=None, warning=friendly_upload_error(e))
     finally:
         conn.close()
 
