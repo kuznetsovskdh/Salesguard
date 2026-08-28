@@ -11,3 +11,4 @@ venv/
 .env
 app/.env
 CLAUDE.md
+app/templates/result.html
