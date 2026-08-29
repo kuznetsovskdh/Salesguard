@@ -45,6 +45,11 @@ services:
       timeout: 5s
       retries: 10
     restart: always
+    networks:
+      - default
+      # Общая сеть с ExperimentHub: clients/salesguard_client.py читает
+      # дневные ряды продаж напрямую из этой БД для DiD-анализа.
+      - eh_network
 
   pgadmin:
     image: dpage/pgadmin4:8
@@ -60,3 +65,7 @@ services:
 volumes:
   pg_data:
   uploads_data:
+
+networks:
+  eh_network:
+    external: true
