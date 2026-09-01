@@ -1,4 +1,4 @@
-import os, json, io
+import os, json, io, uuid
 import pandas as pd
 import plotly.express as px
 import plotly
@@ -45,6 +45,25 @@ def not_found(e):
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 UPLOAD_FOLDER = '/app/uploads'
 ALLOWED = {'.csv', '.xlsx', '.xls', '.json', '.txt'}
+
+
+def upload_path(prefix: str, ext: str) -> str:
+    """Путь для временного файла загрузки.
+
+    Имя генерируется, а не берётся из file.filename. Причины две:
+    имя файла приходит от пользователя, и подстановка его в путь позволяет
+    выйти за пределы UPLOAD_FOLDER через "../"; одинаковые имена у разных
+    продавцов ("отчет.xlsx") затирают файл друг друга.
+
+    Расширение сохраняем — по нему Normalizer._detect_format определяет
+    формат. secure_filename здесь неприменим: он вырезает не-ASCII, и
+    кириллическое имя теряет расширение вместе с определением формата.
+
+    Исходное имя остаётся в file.filename и по-прежнему идёт в БД и в UI.
+    """
+    return os.path.join(UPLOAD_FOLDER, f"{prefix}{uuid.uuid4().hex}{ext}")
+
+
 # Пороги для больших выгрузок: экспорт очищенного xlsx и полный журнал
 # "мусорных" значений на сотнях тысяч строк стоят десятки секунд каждый
 XLSX_EXPORT_MAX_ROWS = 50_000
@@ -131,7 +150,7 @@ def cost_reference_upload():
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED:
         return redirect(url_for("cost_reference_page", err=f"Формат {ext} не поддерживается"))
-    path = os.path.join(UPLOAD_FOLDER, f"costref_{session['user_id']}_{file.filename}")
+    path = upload_path(f"costref_{session['user_id']}_", ext)
     file.save(path)
     try:
         norm = Normalizer()
@@ -248,7 +267,7 @@ def stock_upload():
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED:
         return redirect(url_for("stock_page", err=f"Формат {ext} не поддерживается"))
-    path = os.path.join(UPLOAD_FOLDER, f"stock_{session['user_id']}_{file.filename}")
+    path = upload_path(f"stock_{session['user_id']}_", ext)
     file.save(path)
     try:
         norm = Normalizer()
@@ -619,7 +638,7 @@ def upload():
     if not file: return jsonify({'error': 'Файл не выбран'}), 400
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED: return jsonify({'error': f'Формат {ext} не поддерживается'}), 400
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
+    path = upload_path(f"upload_{session['user_id']}_", ext)
     file.save(path)
     norm = Normalizer(); conn = get_db(); cur = conn.cursor()
     try:
@@ -874,8 +893,9 @@ def debug_page():
 def debug():
     file = request.files.get('file')
     if not file: return jsonify({'error': 'Файл не выбран'}), 400
-    path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(path); ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(file.filename)[1].lower()
+    path = upload_path('debug_', ext)
+    file.save(path)
     norm = Normalizer(); conn = get_db(); cur = conn.cursor()
     try:
         df_raw = norm.load(path)
